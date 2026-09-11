@@ -16,6 +16,12 @@ import { defineConfig, devices } from '@playwright/test';
 const slowMo = Number(process.env.SLOW_MO ?? 0);
 
 /**
+ * A headed run is something a person is watching, so keep it to one browser
+ * window - the default worker count opens four at once, racing each other.
+ */
+const headed = process.argv.includes('--headed') || !!process.env.PWDEBUG;
+
+/**
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
@@ -26,8 +32,8 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
-  /* Opt out of parallel tests on CI. */
-  workers: process.env.CI ? 1 : undefined,
+  /* One worker on CI, and one for headed runs so there is a single window. */
+  workers: process.env.CI || headed ? 1 : undefined,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */

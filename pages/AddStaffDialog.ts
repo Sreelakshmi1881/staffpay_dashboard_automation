@@ -1,8 +1,15 @@
 import { Locator, Page, expect } from '@playwright/test';
 import { StaffData } from '../utils/testData';
 
-/** What a server-backed dropdown renders when it has nothing to offer. */
-const EMPTY_OPTION = /^(No Data Found|No hub found)$/i;
+/**
+ * What a server-backed dropdown renders when it has nothing to offer. Each
+ * one words it differently - "No Data Found", "No hub found", "No Roll Codes
+ * Found" - so match the shape rather than listing them.
+ */
+const EMPTY_OPTION = /^No\s.+\sfound$/i;
+
+/** How long to let a dropdown's options arrive before believing it is empty. */
+const OPTIONS_TIMEOUT_MS = 8_000;
 
 /**
  * The "Add New Staff" dialog (Basic Info + Work Info tabs).
@@ -32,15 +39,39 @@ export class AddStaffDialog {
   submitButton = () => this.root.getByRole('button', { name: 'Add Staff' });
   cancelButton = () => this.root.getByRole('button', { name: 'Cancel' });
 
-  /** Picks an option from a MUI select. Options live in a page-level portal. */
-  private async choose(selectName: string, option: string): Promise<void> {
+  /** Opens a MUI select and returns its option list, which renders in a
+   *  page-level portal rather than inside the dialog. */
+  private async openOptions(selectName: string): Promise<Locator> {
     await this.select(selectName).click();
     const list = this.page.getByRole('listbox');
     await expect(list).toBeVisible();
+    await this.waitForOptionsToArrive(list);
+    return list;
+  }
 
-    // A server-backed dropdown that came back empty renders a single
-    // placeholder row. Say so, rather than timing out on a missing option.
-    const rendered = (await list.getByRole('option').allTextContents()).map((o) => o.trim());
+  /**
+   * These dropdowns fetch their contents when opened, and render the empty
+   * placeholder in the meantime - so an empty menu may simply not have
+   * loaded yet. Give it a moment before taking it at face value, otherwise a
+   * slow staging response reads as "no options" and fails the wrong thing.
+   */
+  private async waitForOptionsToArrive(list: Locator): Promise<void> {
+    await expect(async () => {
+      expect(await this.renderedOptions(list)).not.toEqual([expect.stringMatching(EMPTY_OPTION)]);
+    })
+      .toPass({ timeout: OPTIONS_TIMEOUT_MS, intervals: [200, 300, 500, 1000] })
+      .catch(() => undefined); // genuinely empty - the caller reports it
+  }
+
+  private async renderedOptions(list: Locator): Promise<string[]> {
+    return (await list.getByRole('option').allTextContents()).map((o) => o.trim());
+  }
+
+  /** Picks an option from a MUI select. */
+  private async choose(selectName: string, option: string): Promise<void> {
+    const list = await this.openOptions(selectName);
+
+    const rendered = await this.renderedOptions(list);
     if (rendered.length === 1 && EMPTY_OPTION.test(rendered[0])) {
       throw new Error(`"${selectName}" has no options to pick from (showed "${rendered[0]}").`);
     }
@@ -52,13 +83,11 @@ export class AddStaffDialog {
   /** The options a MUI select currently offers - handy for asserting on
    *  dependent dropdowns that load their values from the server. */
   async optionsFor(selectName: string): Promise<string[]> {
-    await this.select(selectName).click();
-    const list = this.page.getByRole('listbox');
-    await expect(list).toBeVisible();
-    const options = await list.getByRole('option').allTextContents();
+    const list = await this.openOptions(selectName);
+    const options = await this.renderedOptions(list);
     await this.page.keyboard.press('Escape');
     await expect(list).toBeHidden();
-    return options.map((o) => o.trim());
+    return options;
   }
 
   /** Staff Type gates the rest of the form: it loads the Roll Code options
@@ -161,22 +190,32 @@ export class AddStaffDialog {
   }
 
   /** Hub is the only select on the Work Info tab until one is chosen. */
-  async selectHub(hubName: string): Promise<void> {
+  private async openHubOptions(): Promise<Locator> {
     await this.root.locator('[role="tabpanel"]:not([hidden]) [role="button"]').first().click();
     const list = this.page.getByRole('listbox');
     await expect(list).toBeVisible();
+    await this.waitForOptionsToArrive(list);
+    return list;
+  }
+
+  async selectHub(hubName: string): Promise<void> {
+    const list = await this.openHubOptions();
+
+    const rendered = await this.renderedOptions(list);
+    if (rendered.length === 1 && EMPTY_OPTION.test(rendered[0])) {
+      throw new Error(`No hubs to pick from (showed "${rendered[0]}").`);
+    }
+
     await list.getByRole('option', { name: hubName, exact: true }).click();
     await expect(list).toBeHidden();
   }
 
   async availableHubs(): Promise<string[]> {
-    await this.root.locator('[role="tabpanel"]:not([hidden]) [role="button"]').first().click();
-    const list = this.page.getByRole('listbox');
-    await expect(list).toBeVisible();
-    const hubs = await list.getByRole('option').allTextContents();
+    const list = await this.openHubOptions();
+    const hubs = await this.renderedOptions(list);
     await this.page.keyboard.press('Escape');
     await expect(list).toBeHidden();
-    return hubs.map((h) => h.trim());
+    return hubs;
   }
 
   async submit(): Promise<void> {
