@@ -2,7 +2,15 @@
   "name": "staffpay-automation",
   "version": "1.0.0",
   "main": "index.js",
-  "scripts": {},
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:watch": "SLOW_MO=600 playwright test --headed --workers=1",
+    "test:ui": "playwright test --ui",
+    "test:auth": "playwright test --project=setup",
+    "test:no-auth": "playwright test --project=chromium --no-deps",
+    "report": "playwright show-report"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",

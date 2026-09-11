@@ -9,6 +9,13 @@ import { defineConfig, devices } from '@playwright/test';
 // dotenv.config({ path: path.resolve(__dirname, '.env') });
 
 /**
+ * Pause between every browser action, in milliseconds. Zero by default so
+ * normal and CI runs stay fast; `npm run test:watch` turns it up so a headed
+ * run is slow enough to follow along with.
+ */
+const slowMo = Number(process.env.SLOW_MO ?? 0);
+
+/**
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
@@ -27,12 +34,18 @@ export default defineConfig({
     use: {
     baseURL: 'https://staging.staffpay.in',
     trace: 'on-first-retry',
+    launchOptions: { slowMo },
   },
   /* Configure project for Chrome */
-    projects: [
+     projects: [
+    {
+      name: 'setup',
+      testMatch: /.*\.setup\.ts/,
+    },
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], storageState: '.auth/vendor.json' },
+      dependencies: ['setup'],
     },
   ],
 
