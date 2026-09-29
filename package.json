@@ -3,21 +3,34 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "pretest": "npm run clean:results",
     "test": "playwright test",
+    "pretest:headed": "npm run clean:results",
     "test:headed": "playwright test --headed",
+    "pretest:watch": "npm run clean:results",
     "test:watch": "SLOW_MO=600 playwright test --headed --workers=1",
+    "pretest:ui": "npm run clean:results",
     "test:ui": "playwright test --ui",
+    "pretest:auth": "npm run clean:results",
     "test:auth": "playwright test --project=setup",
+    "pretest:no-auth": "npm run clean:results",
     "test:no-auth": "playwright test --project=chromium --no-deps",
-    "report": "playwright show-report"
+    "pretest:staff-creation": "npm run clean:results",
+    "test:staff-creation": "SLOW_MO=600 playwright test --project=\"Staff Creation\" --headed",
+    "clean:results": "rm -rf reports/allure-results",
+    "report": "playwright show-report reports/html-report",
+    "allure": "allure generate reports/allure-results --clean -o reports/allure-report && allure open reports/allure-report",
+    "allure:generate": "allure generate reports/allure-results --clean -o reports/allure-report"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "devDependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1142.0",
     "@playwright/test": "^1.63.0",
     "@types/node": "^26.4.1",
+    "allure-playwright": "^3.13.0",
     "dotenv": "^17.4.2",
     "mysql2": "^3.24.3"
   }

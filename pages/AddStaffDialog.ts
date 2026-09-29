@@ -178,6 +178,9 @@ export class AddStaffDialog {
     await this.choose('shoeSize', staff.shoeSize);
     await this.root.getByRole('checkbox', { name: /Interview Taken/ }).check();
     await this.root.getByRole('checkbox', { name: /Document Validated/ }).check();
+    // Document Validated reveals these two, and both are required.
+    await this.root.getByRole('checkbox', { name: /Aadhaar/ }).check();
+    await this.root.getByRole('checkbox', { name: /PAN/ }).check();
   }
 
   async openWorkInfo(): Promise<void> {
@@ -207,6 +210,20 @@ export class AddStaffDialog {
     }
 
     await list.getByRole('option', { name: hubName, exact: true }).click();
+    await expect(list).toBeHidden();
+  }
+
+  /** The shift picker appears once a hub is chosen, and allows several picks. */
+  async selectShift(shiftName: string): Promise<void> {
+    await this.root
+      .getByRole('combobox')
+      .filter({ has: this.page.getByRole('textbox', { name: 'Select Shift*' }) })
+      .getByRole('button', { name: 'Open' })
+      .click();
+    const list = this.page.getByRole('listbox');
+    await expect(list).toBeVisible();
+    await list.getByRole('option').filter({ has: this.page.getByText(shiftName, { exact: true }) }).click();
+    await this.page.keyboard.press('Escape');
     await expect(list).toBeHidden();
   }
 

@@ -15,6 +15,7 @@ export interface StaffData {
   trouserSize: string;
   shoeSize: string;
   hubName: string;
+  shiftName: string;
 }
 
 /**
@@ -39,7 +40,8 @@ export function buildStaff(overrides: Partial<StaffData> = {}): StaffData {
     shirtSize: 'L',
     trouserSize: '32',
     shoeSize: '9',
-    hubName: '',
+    hubName: 'tEst BD hub',
+    shiftName: 'TEST SHIft',
     ...overrides,
   };
 }

@@ -1,7 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { StaffListPage } from '../pages/StaffListPage';
 import { AddStaffDialog } from '../pages/AddStaffDialog';
+import { allureSuite } from '../utils/allureSuite';
 import { buildStaff } from '../utils/testData';
+
+allureSuite(test, 'AddStaff');
 
 let staffList: StaffListPage;
 let dialog: AddStaffDialog;
@@ -12,7 +15,7 @@ test.beforeEach(async ({ page }) => {
   dialog = await staffList.openAddStaff();
 });
 
-test('add staff dialog opens on the Basic Info tab', async () => {
+test('Verify that the Add Staff dialog opens on the Basic Info tab with a Work Info tab available', async () => {
   await expect(dialog.root.getByRole('tab', { name: 'Basic Info' })).toHaveAttribute(
     'aria-selected',
     'true',
@@ -20,7 +23,7 @@ test('add staff dialog opens on the Basic Info tab', async () => {
   await expect(dialog.root.getByRole('tab', { name: 'Work Info' })).toBeVisible();
 });
 
-test('submit stays disabled and lists every required field when the form is empty', async () => {
+test('Verify that on an empty Add Staff form the Add Staff button stays disabled and every required field is listed', async () => {
   await expect(dialog.submitButton()).toBeDisabled();
   await expect(dialog.validationSummary()).toContainText('Staff Name is required');
   await expect(dialog.validationSummary()).toContainText('Phone Number is required');
@@ -29,7 +32,7 @@ test('submit stays disabled and lists every required field when the form is empt
   );
 });
 
-test('Roll Code options load once a Staff Type is chosen', async () => {
+test('Verify that the Roll Code field appears and loads options only after a Staff Type is chosen', async () => {
   const staff = buildStaff();
 
   expect(await dialog.isFieldVisible('rollCode')).toBe(false);
@@ -41,7 +44,7 @@ test('Roll Code options load once a Staff Type is chosen', async () => {
   expect(await dialog.optionsFor('rollCode')).toContain(staff.rollCode);
 });
 
-test('MOT is asked for delivery staff only', async () => {
+test('Verify that the MOT field is shown for Delivery Staff and hidden for In House Staff', async () => {
   await dialog.selectStaffType('In House Staff');
   expect(await dialog.isFieldVisible('vehicleTypeId')).toBe(false);
 
@@ -49,43 +52,25 @@ test('MOT is asked for delivery staff only', async () => {
   expect(await dialog.isFieldVisible('vehicleTypeId')).toBe(true);
 });
 
-test('cancel closes the dialog without adding anyone', async () => {
+test('Verify that Cancel closes the Add Staff dialog without adding a staff', async () => {
   await dialog.cancel();
   await expect(staffList.addStaffButton()).toBeVisible();
 });
 
 /**
- * BUG (staging): the app requests MOT and hubs with a literal `undefined`
- * customer id - GET /common/vehicleTypesv2/undefined and
- * POST /org/hubs/list/undefined/all/v2 both return 400. The same calls with
- * the real customer id (221) return data, so this is a front-end defect.
- * Both fields are mandatory, which makes the whole flow unsubmittable.
+ * MOT and hubs only load once a branch is picked from the header's org menu -
+ * a fresh login asks for them with `undefined`. auth.setup.ts picks the branch
+ * before saving the session.
  */
-test('MOT options load for delivery staff', async () => {
+test('Verify that the MOT dropdown loads its options, including Driver-Delivery Boy, for Delivery Staff', async () => {
   const staff = buildStaff();
   await dialog.selectStaffType(staff.staffType);
 
   expect(await dialog.optionsFor('vehicleTypeId')).toContain(staff.mot);
 });
 
-test('hubs load on the Work Info tab', async () => {
+test('Verify that the Hub dropdown on the Work Info tab loads the branch hubs', async () => {
   await dialog.openWorkInfo();
 
   expect(await dialog.availableHubs()).not.toEqual(['No hub found']);
-});
-
-test('a delivery staff can be added end to end', async () => {
-  const staff = buildStaff();
-
-  await dialog.fillBasicInfo(staff);
-  await dialog.openWorkInfo();
-  await dialog.selectHub(staff.hubName);
-
-  await expect(dialog.validationSummary()).toBeHidden();
-  await expect(dialog.submitButton()).toBeEnabled();
-  await dialog.submit();
-
-  await expect(dialog.root).toBeHidden();
-  await staffList.search(staff.contactNumber);
-  await expect(staffList.rowFor(staff.name)).toBeVisible();
 });
