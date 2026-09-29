@@ -1,5 +1,6 @@
 import { Page, expect } from '@playwright/test';
 import { getStaffPayOtp } from '../utils/db';
+import { withLoginLock } from '../utils/loginLock';
 
 /** All login-screen locators live here - if the UI changes, only this file does. */
 export class LoginPage {
@@ -40,10 +41,13 @@ export class LoginPage {
     await this.proceedButton().click();
   }
 
+  /** Held under a lock so parallel tests never request OTPs for one number at once. */
   async login(contactNumber: string): Promise<void> {
-    await this.goto();
-    await this.requestOtp(contactNumber);
-    await this.submitOtp(contactNumber);
-    await this.acceptConsent();
+    await withLoginLock(contactNumber, async () => {
+      await this.goto();
+      await this.requestOtp(contactNumber);
+      await this.submitOtp(contactNumber);
+      await this.acceptConsent();
+    });
   }
 }

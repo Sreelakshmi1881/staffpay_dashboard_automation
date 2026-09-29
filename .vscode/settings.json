@@ -1,0 +1,4 @@
+{
+  // Playwright Test for VSCode: open a real browser window when running from the editor.
+  "playwright.showBrowser": true
+}
