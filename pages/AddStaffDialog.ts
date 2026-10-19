@@ -235,8 +235,23 @@ export class AddStaffDialog {
     return hubs;
   }
 
-  async submit(): Promise<void> {
+  /**
+   * Clicks Add Staff and returns the approval request ref. A Bluedart vendor's
+   * new staff is not created outright - the server answers
+   * "PENDING_REQUEST_APPROVAL — BDR-..." and BD OPS has to approve that request.
+   */
+  async submit(): Promise<string> {
+    const created = this.page.waitForResponse(
+      r => r.request().method() === 'POST' && /\/org\/staff\/?$/.test(new URL(r.url()).pathname),
+    );
     await this.submitButton().click();
+    const body = await (await created).json();
+    const message: string = body.status?.message ?? '';
+    const ref = message.match(/BDR-[A-Z0-9]+/)?.[0];
+    if (body.status?.code !== 200 || !ref) {
+      throw new Error(`Add Staff did not raise an approval request: ${JSON.stringify(body.status)}`);
+    }
+    return ref;
   }
 
   async cancel(): Promise<void> {

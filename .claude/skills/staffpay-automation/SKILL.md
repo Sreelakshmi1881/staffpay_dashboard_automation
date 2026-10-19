@@ -16,12 +16,13 @@ suite (titanautomation) - that is a different thing and not what this repo tests
 pages/                    Page objects - all locators live here
   LoginPage.ts            phone -> Get OTP -> OTP from DB -> Login -> T&C consent
   StaffListPage.ts        /staff listing, switchBranch(), openAddStaff(), search()
-  AddStaffDialog.ts       "Add New Staff" dialog: Basic Info + Work Info tabs
+  AddStaffDialog.ts       "Add New Staff" dialog: Basic Info + Work Info tabs; submit() returns the BDR- ref
+  ApprovalWorkflowPage.ts BD OPS "Approval Workflow" tab: Review -> Addition type -> Approve & Submit
 tests/
   auth.setup.ts           logs in once, switches branch, saves .auth/vendor.json
   login.spec.ts           fresh login (starts logged out)
   add-staff.spec.ts       form checks, reuse the saved session
-  create-staff.e2e.spec.ts  one test: login -> branch -> add staff -> find in list
+  create-staff.e2e.spec.ts  one test: vendor adds staff -> OPS approves -> vendor finds staff
   explore.spec.ts         scratch; skipped unless run with --debug
 utils/
   config.ts               vendor number, branch, DB host/port/name (env-overridable)
@@ -108,6 +109,14 @@ they differ from the defaults - never put credentials in the repo.
 
 ## Things that are not obvious
 
+- **Vendor-created staff needs BD OPS approval** (staging change, Oct 2026). Add
+  Staff no longer creates the staff: the POST `/org/staff/` reply is
+  `PENDING_REQUEST_APPROVAL — BDR-...` and nothing appears in the vendor list.
+  BD OPS (`2288777001`, `OPS_NUMBER`) approves it in **Approval Workflow →
+  Review → Addition type "New Addition" → Approve & Submit**; only then does the
+  staff exist. titanautomation does the same step via
+  `POST /bluedart/approval-requests/{ref}/approve`. The OPS login has no consent
+  screen and lands on `/rider-management` (`LoginPage.loginAsOps`).
 - **Branch switch is required after login.** The header already shows
   "Bluedart_Onboarding", but a fresh session has `customerId: null` in its org
   info. Add Staff then calls `/common/vehicleTypesv2/undefined` and

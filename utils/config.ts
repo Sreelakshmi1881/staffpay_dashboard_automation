@@ -4,7 +4,7 @@ dotenv.config();
 /** Test data and environment values - the config.properties equivalent. */
 export const config = {
   vendorNumber: process.env.VENDOR_NUMBER ?? '9519519514',
-  opsNumber: process.env.OPS_NUMBER ?? '',
+  opsNumber: process.env.OPS_NUMBER ?? '2288777001',
   branch: process.env.BRANCH ?? 'Bluedart_Onboarding',
 
   db: {

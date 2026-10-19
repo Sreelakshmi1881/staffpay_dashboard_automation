@@ -21,16 +21,32 @@ export class StaffListPage {
    * nothing back - choosing the branch loads it.
    */
   async switchBranch(branch: string): Promise<void> {
-    await this.page.getByText(branch.slice(0, 15)).first().click();
+    // Right after login the header can ignore a click, or the popup can close
+    // without switching - so wait for the page, and check each step worked.
+    await expect(this.addStaffButton()).toBeVisible();
+    await this.page.waitForLoadState('networkidle');
     const switcher = this.page.getByRole('dialog').filter({ hasText: 'Switch Branches' });
-    // Listen before clicking - under SLOW_MO the PUT can finish before a
-    // listener added after the click is attached.
-    const switched = this.page.waitForResponse(
-      r => r.request().method() === 'PUT' && /\/orgs\/\d+$/.test(r.url()),
-    );
-    await switcher.getByText(branch, { exact: true }).click();
-    await switched;
-    await expect(switcher).toBeHidden();
+    // The popup opens empty and fills from /orgs/all - wait for the entry.
+    const entry = switcher.getByText(branch, { exact: true });
+
+    for (let attempt = 1; ; attempt++) {
+      await expect(async () => {
+        if (!(await switcher.isVisible())) await this.page.getByText(branch.slice(0, 15)).first().click();
+        await expect(entry).toBeVisible({ timeout: 3_000 });
+      }).toPass({ timeout: 20_000 });
+      // Listen before clicking - under SLOW_MO the PUT can finish before a
+      // listener added after the click is attached.
+      const switched = this.page
+        .waitForResponse(r => r.request().method() === 'PUT' && /\/orgs\/\d+$/.test(r.url()), {
+          timeout: 15_000,
+        })
+        .then(() => true, () => false);
+      await entry.click();
+      const ok = await switched;
+      await expect(switcher).toBeHidden();
+      if (ok) return;
+      if (attempt === 2) throw new Error(`Switching to branch "${branch}" never reached the server.`);
+    }
   }
 
   async openAddStaff(): Promise<AddStaffDialog> {
