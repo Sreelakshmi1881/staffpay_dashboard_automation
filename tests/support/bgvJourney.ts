@@ -23,6 +23,7 @@ import {
   buildRiderProfile,
   SAMPLE_KYC_DOCUMENTS,
   TEST_PROFILE_IMAGE_FILE,
+  TEST_BGV_ADDRESS,
   TEST_SELFIE_IMAGE_FILE,
 } from '../../utils/testData';
 
@@ -158,18 +159,24 @@ export async function createRiderWithBgvInitiated(
     expect((await getUserDocument(record.userId, 'PANCARD', 'APPROVED'))?.approvalStatus, 'PANCARD - staging answered PAN Update with SUCCESS but stored no PAN; it drops PANs that fail verification, so set PAN_TEST_NUMBER in .env to a staging test PAN that passes (ask the backend team)').toBe('APPROVED');
   });
 
-  await test.step('Initiate BGV', async () => {
-    // Saving the PAN usually starts BGV by itself, which disables Initiate.
-    const clicked = await details.initiateButton().isEnabled();
-    if (clicked) await details.initiateBgv();
-    const how = clicked ? 'Initiate clicked' : 'already started by the PAN Update - Initiate disabled';
-    test.info().annotations.push({ type: 'BGV start', description: how });
-    console.info(`BGV start: ${how}`);
+  await test.step('Start BGV: it comes back Insufficient for want of an address, then Retrigger BGV with one', async () => {
+    // Saving Aadhaar + PAN starts BGV at once, but an Aadhaar typed in on the
+    // vendor portal carries no address, so the check comes straight back
+    // Insufficient without reaching AuthBridge - the same thing
+    // titanautomation sees, and fixes with an OPS retrigger plus address.
+    expect(await waitForBgvStatus(record.userId, 'Insufficient'), 'user_info.bgv_status right after the PAN save').toBe('Insufficient');
+
+    // The Retrigger BGV button only renders on a freshly opened detail page.
+    await staffList.openFromNav();
+    await staffList.search(staff.contactNumber);
+    await staffList.rowFor(staff.name).click();
+    await details.waitForUser(record.userId);
+    await details.retriggerBgvWithAddress(TEST_BGV_ADDRESS);
 
     await expect
       .poll(async () => (await getUserDocument(record.userId, 'PANCARD'))?.dlCaseCheck, {
         message: 'entity_documents PANCARD dl_case_check',
-        timeout: 20_000,
+        timeout: 30_000,
       })
       .toBe('INITIATED');
     expect((await getCourtCase(record.userId, 'WorkInProgress'))?.caseStatus, 'rider_court_case_check').toBe('WorkInProgress');

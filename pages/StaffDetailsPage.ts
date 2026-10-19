@@ -128,14 +128,33 @@ export class StaffDetailsPage {
   }
 
   /**
-   * The Pan Card's "Initiate" button starts BGV. The page only enables it while
-   * BGV hasn't started (dl_case_check empty or INITIATION_FAILED); saving the
-   * PAN usually starts BGV by itself, which disables it.
+   * The Pan Card's "Initiate" button. Despite the name it calls
+   * /dl/verification/existing/user (a DL check) - it does not start BGV.
    */
   initiateButton = (): Locator => this.panCard().getByRole('button', { name: 'Initiate', exact: true });
 
   async initiateBgv(): Promise<void> {
     await this.submit(this.initiateButton(), 'Initiate');
+  }
+
+  retriggerBgvButton = (): Locator => this.page.getByRole('button', { name: 'Retrigger BGV', exact: true });
+
+  /**
+   * "Retrigger BGV" -> address -> "Initiate BGV". Saving Aadhaar + PAN starts
+   * BGV at once, but a rider whose Aadhaar has no address (any rider whose
+   * Aadhaar is typed in on the vendor portal) comes straight back
+   * Insufficient without reaching AuthBridge. Supplying the address here sends
+   * it on - the dashboard form of titanautomation's
+   * triggerManualBgvWithAddress (POST /org/staff/bgv/manual/trigger).
+   */
+  async retriggerBgvWithAddress(address: string): Promise<void> {
+    await this.retriggerBgvButton().scrollIntoViewIfNeeded();
+    await this.retriggerBgvButton().click();
+    const dialog = this.page.getByRole('dialog').filter({ hasText: 'Retrigger Background Verification' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('textbox').fill(address);
+    await this.submit(dialog.getByRole('button', { name: 'Initiate BGV', exact: true }), 'Initiate BGV');
+    await expect(dialog).toBeHidden();
   }
 
   /**

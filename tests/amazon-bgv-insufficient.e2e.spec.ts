@@ -11,11 +11,15 @@ const kyc = useKycTestNumbers();
 /**
  * BGV journey where AuthBridge can't conclude: rider with BGV initiated (see
  * bgvJourney), then an interim Insufficient court-case result. Insufficient is
- * "more information needed", not a rejection: the court case and BGV read
- * Insufficient, the rider and documents stay approved and nothing is
+ * "more information needed", not a rejection: the court case records the
+ * interim result, BGV stays in progress (INITIATED - an interim result does
+ * not conclude it), the rider and documents stay approved and nothing is
  * blacklisted.
+ * Observed on staging 2026-10-19; the earlier expectation (bgv_status =
+ * Insufficient) only held because BGV had already come back Insufficient for
+ * want of an Aadhaar address, before AuthBridge was involved.
  */
-test('Verify that a rider whose BGV court case comes back Insufficient stays approved with BGV marked Insufficient', async ({ page, request }) => {
+test('Verify that an interim Insufficient BGV court case is recorded, BGV stays in progress and the rider stays approved', async ({ page, request }) => {
   // A full journey with two logins and the BGV round trip - longer than the project's 90s.
   test.setTimeout(240_000);
   const rider = await createRiderWithBgvInitiated(page, request, (id, phone) => Object.assign(kyc, { userId: id, contactNumber: phone }));
@@ -42,26 +46,29 @@ test('Verify that a rider whose BGV court case comes back Insufficient stays app
     test.info().annotations.push({ type: 'After Insufficient', description: JSON.stringify(observed) });
   });
 
-  await test.step('Verify BGV is Insufficient and the rider stays approved', async () => {
+  await test.step('Verify the interim Insufficient is recorded, BGV stays in progress and the rider stays approved', async () => {
     // rider_court_case_check: AuthBridge's interim result.
     expect(await getCourtCase(userId), 'rider_court_case_check').toMatchObject({
       caseStatus: 'Complete',
       caseSeverity: 'Insufficient',
       state: 'Interim',
     });
-    // user_info and the PAN's court-case check: Insufficient.
-    await expect
-      .poll(async () => (await getStaffRecord(rider.staff.contactNumber))?.bgvStatus, { message: 'user_info.bgv_status', timeout: 20_000 })
-      .toBe('Insufficient');
-    expect((await getUserDocument(userId, 'PANCARD'))?.dlCaseCheck, 'PANCARD dl_case_check').toBe('Insufficient');
+    // Interim, so BGV is not concluded: user_info and the PAN's court-case
+    // check stay INITIATED - not VERIFIED, not FAILED.
+    expect((await getStaffRecord(rider.staff.contactNumber))?.bgvStatus, 'user_info.bgv_status').toBe('INITIATED');
+    expect((await getUserDocument(userId, 'PANCARD'))?.dlCaseCheck, 'PANCARD dl_case_check').toBe('INITIATED');
+    // Not a rejection: nothing blacklisted either.
+    for (const docType of ['AADHAR', 'PANCARD']) {
+      expect((await getUserDocument(userId, docType))?.isActive, `${docType} still active`).toBe(1);
+    }
     // Not a rejection: rider and documents stay approved.
     expect(await getStaffRecord(rider.staff.contactNumber), 'users').toMatchObject({ status: 'APPROVED', isActive: 1 });
     for (const docType of ['AADHAR', 'PANCARD']) {
       expect((await getUserDocument(userId, docType))?.approvalStatus, `${docType} approval_status`).toBe('APPROVED');
     }
 
-    await reopenRider(page, rider);
-    await expect.soft(page.getByText('Insufficient', { exact: true }).first(), 'BGV timeline shows "Insufficient"').toBeVisible();
+    const details = await reopenRider(page, rider);
+    await expect.soft(details.bgvInitiated(), 'BGV timeline still shows "Background Verification Initiated"').toBeVisible();
     const shown = await bgvTextOnPage(page);
     test.info().annotations.push({ type: 'UI after Insufficient', description: shown || '<nothing>' });
     console.info('UI after Insufficient: ' + (shown || '<nothing>'));

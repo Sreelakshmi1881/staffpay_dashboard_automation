@@ -19,6 +19,7 @@ import {
   buildRiderProfile,
   buildKycNumbers,
   SAMPLE_KYC_DOCUMENTS,
+  TEST_BGV_ADDRESS,
   TEST_PROFILE_IMAGE_FILE,
   TEST_SELFIE_IMAGE_FILE,
 } from '../utils/testData';
@@ -276,8 +277,13 @@ test('Verify that a vendor can upload Aadhaar and PAN with their numbers and app
       ['Aadhaar', details.aadhaarCard(), 'AADHAR'],
       ['PAN', details.panCard(), 'PANCARD'],
     ] as const) {
-      // Save / Update already approved it on staging, so Approve is usually disabled.
-      if (await details.approveButton(card).isEnabled()) await details.approve(card);
+      // Save / Update already approve it on staging ("Manually Verified"); the
+      // Approve button can still look enabled but sends nothing then, so only
+      // click it for a document that is not approved yet.
+      const before = await getUserDocument(rider.userId, docType, undefined, 1_000);
+      if (before?.approvalStatus !== 'APPROVED' && (await details.approveButton(card).isEnabled())) {
+        await details.approve(card);
+      }
       const doc = await getUserDocument(rider.userId, docType, 'APPROVED');
       expect(doc?.approvalStatus, `${label} (${docType}) approval_status`).toBe('APPROVED');
     }
@@ -297,11 +303,19 @@ test('Verify that a vendor can upload Aadhaar and PAN with their numbers and app
       .map(l => l.trim())
       .filter(l => /\bBGV\b|Background Verification|^Verified$/i.test(l));
 
+  await test.step('BGV comes back Insufficient for want of an address - Retrigger BGV with one', async () => {
+    // Saving Aadhaar + PAN starts BGV, but a vendor-typed Aadhaar has no
+    // address, so it is Insufficient at once (see bgvJourney).
+    expect(await waitForBgvStatus(rider.userId, 'Insufficient'), 'user_info.bgv_status right after the PAN save').toBe('Insufficient');
+    await reopenRider();
+    await details.retriggerBgvWithAddress(TEST_BGV_ADDRESS);
+  });
+
   await test.step('Verify BGV is initiated', async () => {
     await expect
       .poll(async () => (await getUserDocument(rider.userId, 'PANCARD'))?.dlCaseCheck, {
         message: 'entity_documents PANCARD dl_case_check',
-        timeout: 20_000,
+        timeout: 30_000,
       })
       .toBe('INITIATED');
 

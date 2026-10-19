@@ -8,9 +8,9 @@ description: How the StaffPay vendor dashboard UI automation (Playwright + TypeS
 > **Status (2026-10-19):** both flows run. **Blue Dart**: vendor-created staff
 > go through a BD OPS approval, which the Staff Creation journey does in the
 > dashboard (see "Blue Dart flow"). **Amazon Now** (org *Amazon Tez Bangalore*):
-> staff creation passes; the KYC / BGV journeys stop at the PAN step because
-> staging stores no PAN from the vendor portal's Update (see "Amazon KYC test
-> numbers").
+> staff creation, KYC and the BGV journeys (Clear, Discrepant, Insufficient,
+> Attention Required) all run - see "Amazon KYC test numbers" and "Amazon BGV
+> start" for the staging behaviour they rely on.
 
 Playwright + TypeScript UI tests for the StaffPay **vendor dashboard** on staging
 (`https://staging.staffpay.in`). Everything goes through the UI; the API is not
@@ -370,13 +370,17 @@ blacklisting cleared before and after):
 - **Aadhaar:** the team's fixed staging test number, `AADHAAR_TEST_NUMBER` in
   `.env` (gitignored; never commit, log or report it). Made-up numbers fail
   staging's checksum check ("Please enter valid Aadhar number").
-- **PAN:** `PAN_TEST_NUMBER` from `.env` if set, else generated per run (4th
-  letter E - no such holder type, so never a real PAN). **Known staging issue
-  (since ~2026-10-08, still on 2026-10-19):** the vendor portal's PAN Update
-  answers `SUCCESS` but writes no `PANCARD` row, for the old team test PAN and
-  for generated ones, so every KYC/BGV journey stops at the PAN check with a
-  message saying so. It looks like PANs that fail verification are dropped;
-  a staging test PAN that passes is needed from the backend team.
+- **PAN:** the team's staging test PAN, `PAN_TEST_NUMBER` in `.env` - required
+  in practice. Staging verifies PANs and **silently drops** one that fails:
+  PAN Update answers `SUCCESS` but no `PANCARD` row is written (seen with the
+  old `BBAEA9000M` and with generated PANs since ~2026-10-08). Unset, a PAN is
+  generated (4th letter E, never a real PAN) and the journey fails at the PAN
+  check with a message saying this. Never use a real person's PAN - the
+  titanautomation "Charles" numbers are real documents.
+- If the test PAN is active on a rider outside this suite (e.g. a manual
+  "test 123" rider), the save is dropped as a duplicate; the cleanup only
+  touches "Auto QA amzuser %" riders, so free it by hand (deactivate that
+  one `entity_documents` row) after checking with whoever owns the rider.
 - **`useKycTestNumbers()`** (in each KYC file): `beforeAll` takes the
   `kyc-test-numbers` lock (`utils/loginLock.ts`; one KYC test at a time across
   workers, stale after 15 min) and frees the fixed numbers
@@ -388,6 +392,31 @@ blacklisting cleared before and after):
   The `user_blacklist` part is what titanautomation's
   `clear_the_blacklisted_documents` does; without it a Discrepant run blocks
   the test Aadhaar for every later rider.
+- Saving Aadhaar + PAN on the vendor portal approves both straight away
+  ("Manually Verified"); Approve may still look enabled but sends nothing, so
+  the tests only click it for a document that isn't APPROVED yet.
+
+## Amazon BGV start
+
+- BGV starts as soon as Aadhaar + PAN are saved, but a vendor-typed Aadhaar
+  has no address, so it comes back **Insufficient at once** (court case
+  `Insufficient`, `user_info.bgv_status = 'Insufficient'`) without reaching
+  AuthBridge - the case titanautomation's "Aadhaar has no address" test
+  covers.
+- **Retrigger BGV** on the detail page (fresh page load) -> "Retrigger
+  Background Verification" dialog -> Address* -> **Initiate BGV** sends it to
+  AuthBridge: PAN `dl_case_check = INITIATED`, court case `WorkInProgress`,
+  `bgv_status = INITIATED` (`StaffDetailsPage.retriggerBgvWithAddress`,
+  address `TEST_BGV_ADDRESS`). titanautomation does the same via
+  `POST /org/staff/bgv/manual/trigger`.
+- The Pan Card's **Initiate** button is not BGV - it calls
+  `/dl/verification/existing/user`.
+- An **interim Insufficient** AuthBridge result is stored on the court case
+  (`Complete` / `Insufficient` / `Interim`) but does not conclude BGV:
+  `bgv_status` and PAN `dl_case_check` stay `INITIATED`, the UI still says
+  "Background Verification Initiated" (observed 2026-10-19; confirm with
+  product if Insufficient should show on the rider).
+
 - KYC sample images: `test-assets/sample-aadhaar-front.png`,
   `sample-aadhaar-back.png`, `sample-pan.png` - generated, marked
   "SAMPLE - TEST ONLY", masked numbers. Override with `AADHAAR_FRONT_IMAGE` /

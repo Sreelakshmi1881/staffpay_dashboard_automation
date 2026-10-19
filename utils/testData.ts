@@ -138,6 +138,12 @@ function fakePan(): string {
 }
 
 /**
+ * Address typed into "Retrigger BGV" for a rider whose Aadhaar has none.
+ * Nothing downstream checks it against the rider - a test address is enough.
+ */
+export const TEST_BGV_ADDRESS = 'No 42, QA Test Street, HSR Layout, Bengaluru, Karnataka, 560102';
+
+/**
  * KYC document images: generated samples marked "SAMPLE - TEST ONLY" with
  * made-up names and masked numbers. Never use real Aadhaar / PAN images.
  */
