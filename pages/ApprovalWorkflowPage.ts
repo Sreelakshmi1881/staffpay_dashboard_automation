@@ -19,8 +19,13 @@ export class ApprovalWorkflowPage {
   private reviewDialog = (requestRef: string) => this.page.getByRole('dialog').filter({ hasText: requestRef });
 
   async open(): Promise<void> {
-    await this.tab().click();
-    await expect(this.tab()).toHaveAttribute('aria-selected', 'true');
+    // Right after the OPS login, Rider Management loads behind a full-page
+    // spinner backdrop that swallows clicks - on a slow staging it can stay
+    // up for well over the 15s action timeout, so keep trying for a minute.
+    await expect(async () => {
+      await this.tab().click({ timeout: 5_000 });
+      await expect(this.tab()).toHaveAttribute('aria-selected', 'true', { timeout: 2_000 });
+    }).toPass({ timeout: 60_000 });
   }
 
   async showStatus(status: 'Pending' | 'Rejected' | 'Approved'): Promise<void> {

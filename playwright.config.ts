@@ -67,6 +67,12 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'], storageState: '.auth/vendor.json' },
       dependencies: ['setup'],
     },
+    /* `npm run cleanup:kyc` - deactivates test riders' Aadhaar / PAN rows.
+       No browser, no dependencies; never picked up by the other projects. */
+    {
+      name: 'KYC Cleanup',
+      testMatch: /.*\.cleanup\.ts/,
+    },
     /* Full journeys that log in themselves, in one browser session. No
        dependencies, so running the file runs just that journey. Parallel logins
        are kept apart by the lock in LoginPage.login. */

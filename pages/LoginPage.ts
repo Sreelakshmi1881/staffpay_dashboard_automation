@@ -41,13 +41,17 @@ export class LoginPage {
     await this.proceedButton().click();
   }
 
-  /** Held under a lock so parallel tests never request OTPs for one number at once. */
-  async login(contactNumber: string): Promise<void> {
+  /**
+   * Held under a lock so parallel tests never request OTPs for one number at once.
+   * Only Blue Dart vendors are shown the consent screen - pass `consent: false`
+   * for other orgs (Amazon lands straight on the dashboard).
+   */
+  async login(contactNumber: string, { consent = true }: { consent?: boolean } = {}): Promise<void> {
     await withLoginLock(contactNumber, async () => {
       await this.goto();
       await this.requestOtp(contactNumber);
       await this.submitOtp(contactNumber);
-      await this.acceptConsent();
+      if (consent) await this.acceptConsent();
     });
   }
 

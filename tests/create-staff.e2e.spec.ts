@@ -36,8 +36,7 @@ test('Verify that a staff added by the vendor is raised for approval, and once B
 
     await expect(dialog.validationSummary()).toBeHidden();
     await expect(dialog.submitButton()).toBeEnabled();
-    requestRef = await dialog.submit();
-    await expect(dialog.root).toBeHidden();
+    requestRef = await dialog.submitForApproval();
     test.info().annotations.push({ type: 'approval request', description: requestRef });
   });
 

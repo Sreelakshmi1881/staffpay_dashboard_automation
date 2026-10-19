@@ -19,7 +19,8 @@ export default class RecordingsReporter implements Reporter {
   onTestEnd(test: TestCase, result: TestResult): void {
     for (const video of result.attachments.filter(a => a.name === 'video' && a.path)) {
       const project = (test.parent.project()?.name ?? 'test').replace(/[^\w-]+/g, '_');
-      const title = test.title.replace(/[^\w-]+/g, '_');
+      // Keep well under the 255-byte file name limit - long test titles crash the copy.
+      const title = test.title.replace(/[^\w-]+/g, '_').slice(0, 120);
       const retry = result.retry ? `_retry${result.retry}` : '';
       this.videos.push({ from: video.path!, name: `${project}__${title}${retry}__${result.status}.webm` });
     }
