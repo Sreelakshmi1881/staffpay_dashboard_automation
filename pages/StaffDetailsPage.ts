@@ -84,8 +84,17 @@ export class StaffDetailsPage {
    * errors as HTTP 200 with status.code in the body. Never logs the number.
    */
   private async enterNumberAndSubmit(card: Locator, value: string, buttonName: string): Promise<void> {
-    await card.getByRole('textbox').first().fill(value);
-    await this.submit(card.getByRole('button', { name: buttonName, exact: true }), buttonName);
+    const input = card.getByRole('textbox').first();
+    const button = card.getByRole('button', { name: buttonName, exact: true });
+    // Saving the Aadhaar reloads the KYC section; a number typed while that
+    // reload is still landing (easy under SLOW_MO) is wiped and the button
+    // stays disabled. Type it again until it sticks.
+    await expect(async () => {
+      if ((await input.inputValue()) !== value) await input.fill(value);
+      await expect(input).toHaveValue(value, { timeout: 2_000 });
+      await expect(button).toBeEnabled({ timeout: 2_000 });
+    }).toPass({ timeout: 30_000 });
+    await this.submit(button, buttonName);
   }
 
   private async submit(button: Locator, buttonName: string): Promise<void> {
