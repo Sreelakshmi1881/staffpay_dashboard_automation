@@ -41,13 +41,35 @@ export class LoginPage {
     await this.proceedButton().click();
   }
 
-  /** Held under a lock so parallel tests never request OTPs for one number at once. */
-  async login(contactNumber: string): Promise<void> {
+  /**
+   * Held under a lock so parallel tests never request OTPs for one number at once.
+   * Only Blue Dart vendors are shown the consent screen - pass `consent: false`
+   * for other orgs (Amazon lands straight on the dashboard).
+   */
+  async login(contactNumber: string, { consent = true }: { consent?: boolean } = {}): Promise<void> {
     await withLoginLock(contactNumber, async () => {
       await this.goto();
       await this.requestOtp(contactNumber);
       await this.submitOtp(contactNumber);
-      await this.acceptConsent();
+      if (consent) await this.acceptConsent();
     });
+  }
+
+  /** BD OPS: no consent screen, and it lands on Rider Management. */
+  async loginAsOps(contactNumber: string): Promise<void> {
+    await withLoginLock(contactNumber, async () => {
+      await this.goto();
+      await this.requestOtp(contactNumber);
+      await this.submitOtp(contactNumber);
+      await this.page.waitForURL(/\/rider-management/);
+    });
+  }
+
+  /** The session lives in localStorage, so clearing it is a full log out. */
+  async logout(): Promise<void> {
+    await this.page.evaluate(() => localStorage.clear());
+    await this.page.context().clearCookies();
+    await this.goto();
+    await expect(this.getOtpButton()).toBeVisible();
   }
 }

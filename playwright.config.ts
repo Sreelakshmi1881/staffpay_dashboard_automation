@@ -49,6 +49,9 @@ export default defineConfig({
     baseURL: 'https://staging.staffpay.in',
     trace: 'on-first-retry',
     video: 'on',
+    /* A click or fill that cannot find its element fails after 15s instead of
+       waiting out the whole test timeout. */
+    actionTimeout: slowMo ? 30_000 : 15_000,
     screenshot: 'only-on-failure',
     launchOptions: { slowMo },
   },
@@ -64,14 +67,21 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'], storageState: '.auth/vendor.json' },
       dependencies: ['setup'],
     },
+    /* `npm run cleanup:kyc` - deactivates test riders' Aadhaar / PAN rows.
+       No browser, no dependencies; never picked up by the other projects. */
+    {
+      name: 'KYC Cleanup',
+      testMatch: /.*\.cleanup\.ts/,
+    },
     /* Full journeys that log in themselves, in one browser session. No
        dependencies, so running the file runs just that journey. Parallel logins
        are kept apart by the lock in LoginPage.login. */
     {
       name: 'Staff Creation',
       testMatch: /.*\.e2e\.spec\.ts/,
-      /* A whole journey takes ~25s, plus any wait for the login lock. */
-      timeout: slowMo ? 180_000 : 90_000,
+      /* Three logins (vendor, OPS, vendor) plus the form - about a minute,
+         plus any wait for the login lock. */
+      timeout: slowMo ? 360_000 : 180_000,
       use: { ...devices['Desktop Chrome'] },
     },
   ],

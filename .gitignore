@@ -11,3 +11,7 @@ node_modules/
 
 # Test reports and recordings
 /reports/
+
+# Personal test images (e.g. a real selfie used with consent) - never commit
+/test-assets/private/
+.DS_Store
