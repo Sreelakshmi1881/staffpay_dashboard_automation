@@ -79,6 +79,22 @@ export class RiderApi {
   }
 
   /**
+   * Gets the rider's token without the app's OTP login, the way titanautomation
+   * does (TitanAPI.generateToken, fixtures/generate_token.json): POST
+   * /auth/generate-token with the rider's user id and number. Staging refuses
+   * scripted /auth/sendOtp ("Please update the Rider app"), whatever appv is sent.
+   */
+  async useGeneratedToken(userId: string | number, contactNumber: string): Promise<void> {
+    const res = await this.request.post(`${BASE_URL}/auth/generate-token`, {
+      headers: { 'Content-Type': 'application/json' },
+      data: { userId: String(userId), leadId: 0, contactNumber },
+    });
+    const body = await this.ok(res, 'generate-token');
+    this.token = body.response.token;
+    this.userId = String(userId);
+  }
+
+  /**
    * Uploads an image the way the apps do: GET /orgs/presigned-urls for a
    * signed S3 PUT URL, PUT the file there, and use the URL without its query
    * string as the image link. The server picks the S3 key itself.

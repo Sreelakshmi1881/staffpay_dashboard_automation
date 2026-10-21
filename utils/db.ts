@@ -172,7 +172,7 @@ export const TEST_RIDER_DOC_TYPES = ['AADHAR', 'PANCARD'];
  * Test cleanup: marks a test rider's KYC documents inactive (is_active = 0) so
  * the fixed Aadhaar / PAN numbers in .env can be saved again next run instead
  * of coming back DUPLICATE_REJECTED. Only touches riders created by this suite
- * (name "Auto QA amzuser ..."), never anyone else. Returns the rows changed.
+ * (numbers starting 421 - see buildAmazonStaff), never anyone else. Returns the rows changed.
  */
 export async function deactivateTestRiderDocuments(
   userId: number,
@@ -189,14 +189,14 @@ export async function deactivateTestRiderDocuments(
                  AND ed.entity_type = 'USER'
                  AND ed.doc_type IN (${docTypes.map(() => '?').join(', ')})
                  AND (ed.is_active = 1${unblacklist ? ' OR ed.is_blacklisted = 1' : ''})
-                 AND u.name LIKE 'Auto QA amzuser %'`;
+                 AND u.contact_number LIKE '421%'`;
   const [result] = await (await getPool()).execute<mysql.ResultSetHeader>(sql, [userId, ...docTypes]);
   return result.affectedRows;
 }
 
 /**
  * Standalone cleanup (npm run cleanup:kyc): deactivates every active AADHAR /
- * PANCARD row on this suite's test riders ("Auto QA amzuser ..."), e.g. after
+ * PANCARD row on this suite's test riders (numbers starting 421), e.g. after
  * a run was interrupted before its own afterAll cleanup. Frees the fixed
  * Aadhaar / PAN numbers in .env for reuse. Never touches other riders.
  * Returns the rows changed, per document type.
@@ -211,7 +211,7 @@ export async function deactivateAllTestRiderKycDocuments(): Promise<Record<strin
        WHERE ed.entity_type = 'USER'
          AND ed.doc_type = ?
          AND ed.is_active = 1
-         AND u.name LIKE 'Auto QA amzuser %'`,
+         AND u.contact_number LIKE '421%'`,
       [docType],
     );
     changed[docType] = result.affectedRows;
@@ -263,17 +263,17 @@ export async function waitForBgvStatus(userId: number, status: string, timeoutMs
 }
 
 /**
- * Frees the fixed staging test numbers (Aadhaar first, then a fixed PAN if one
- * is configured) for the next rider - the same
- * cleanup titanautomation runs before and after its Amazon BGV tests
- * (clear_the_blacklisted_documents / clear_the_blacklisting_this_test_caused):
- *  - entity_documents: clears is_blacklisted on rows with these numbers, and
- *    deactivates active rows still held by this suite's test riders (else the
- *    next save is DUPLICATE_REJECTED, "Documents are linked to another user");
- *  - user_blacklist: clears the row Discrepant writes against the Aadhaar,
- *    which otherwise blocks that Aadhaar for every future rider.
- * Only ever called with the configured test numbers, never a real ID. Each
- * rider's own rows are also cleaned by deactivateTestRiderDocuments.
+ * Frees the KYC identity's Aadhaar (first) and PAN for the next rider, so a
+ * save is never DUPLICATE_REJECTED ("Documents are linked to another user") or
+ * refused as blacklisted - the same cleanup titanautomation runs around its
+ * tests (DbConnect.updateEntityDocsKYC + clear_the_blacklisted_documents):
+ *  - entity_documents: deactivates EVERY active row with these numbers,
+ *    whoever holds it (a manual test rider, another suite's run) - the
+ *    duplicate check only looks at active rows - and clears is_blacklisted;
+ *  - user_blacklist: clears the rows a Discrepant verdict writes against the
+ *    Aadhaar, which otherwise block it for every future rider.
+ * entity_document_logs (history) is left alone - it plays no part in the check.
+ * Only ever called with the configured test identity's numbers.
  */
 export async function releaseTestKycNumbers(numbers: string[]): Promise<Record<string, number>> {
   const aadhaar = numbers[0];
@@ -285,11 +285,8 @@ export async function releaseTestKycNumbers(numbers: string[]): Promise<Record<s
     numbers,
   );
   const [deactivated] = await db.execute<mysql.ResultSetHeader>(
-    `UPDATE entity_documents ed
-     JOIN users u ON u.id = ed.entity_id
-     SET ed.is_active = 0
-     WHERE ed.entity_type = 'USER' AND ed.doc_number IN (${marks}) AND ed.is_active = 1
-       AND u.name LIKE 'Auto QA amzuser %'`,
+    `UPDATE entity_documents SET is_active = 0
+     WHERE entity_type = 'USER' AND doc_number IN (${marks}) AND is_active = 1`,
     numbers,
   );
   const [userBlacklist] = await db.execute<mysql.ResultSetHeader>(

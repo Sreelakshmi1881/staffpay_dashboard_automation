@@ -10,7 +10,7 @@ allureSuite(test, 'Cleanup');
  * a run was interrupted before that, or Aadhaar / PAN come back
  * DUPLICATE_REJECTED ("Documents are linked to another user").
  */
-test('Deactivate the Aadhaar and PAN documents of all Auto QA test riders', async () => {
+test('Deactivate the Aadhaar and PAN documents of all test riders (numbers starting 421)', async () => {
   // Only via npm run cleanup:kyc - never as part of a full `npm test`, where it
   // could deactivate documents while the Amazon KYC test is using them.
   test.skip(process.env.RUN_KYC_CLEANUP !== 'true', 'run with: npm run cleanup:kyc');

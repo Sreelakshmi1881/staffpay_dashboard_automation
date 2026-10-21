@@ -1,47 +1,83 @@
 ---
 name: staffpay-automation
-description: How the StaffPay vendor dashboard UI automation (Playwright + TypeScript) is built, run and extended - login via DB OTP, branch switch, Add Staff flows for Amazon Now (Amazon Tez Bangalore) and Blue Dart (with BD OPS approval), DB checks on users/user_info, DB secrets, Allure reports and recordings. Use when adding, running, debugging or reviewing tests in this repo.
+description: How the StaffPay vendor dashboard UI automation (Playwright + TypeScript) is built, run and extended - login via DB OTP, branch switch, Add Staff flows for Amazon Now (Amazon Tez Bangalore) and Blue Dart (with BD OPS approval), one KYC identity (Somesh) for Amazon KYC/BGV, selfie via the rider-app API, document cleanup, BGV cost rules, DB secrets, Allure reports and recordings. Use when adding, running, debugging or reviewing tests in this repo.
 ---
 
 # StaffPay dashboard automation
 
-> **Status (2026-10-19):** both flows run. **Blue Dart**: vendor-created staff
-> go through a BD OPS approval, which the Staff Creation journey does in the
-> dashboard (see "Blue Dart flow"). **Amazon Now** (org *Amazon Tez Bangalore*):
-> staff creation, KYC and the BGV journeys (Clear, Discrepant, Insufficient,
-> Attention Required) all run - see "Amazon KYC test numbers" and "Amazon BGV
-> start" for the staging behaviour they rely on.
+> **Status (2026-10-21):**
+> - **Blue Dart** runs end to end: vendor adds staff -> BD OPS approves in
+>   Approval Workflow -> vendor finds the staff (see "Blue Dart flow").
+> - **Amazon Now** (org *Amazon Tez Bangalore*): staff creation, selfie (via
+>   the rider-app API) and Aadhaar save work with one consistent identity,
+>   **Somesh Mallick** (`tests/amazon-kyc-upload.e2e.spec.ts`). The BGV journeys
+>   (Clear, Discrepant, Insufficient, Attention Required) ran on 2026-10-19 with
+>   mismatched sample data; they need re-running with the Somesh identity -
+>   **ask first, they cost money** (see "BGV costs money").
+> - Open with the devs: uploaded KYC images are not linked to the saved
+>   document row (`doc_link` null), so face match reports "Face Match Failed".
 
 Playwright + TypeScript UI tests for the StaffPay **vendor dashboard** on staging
-(`https://staging.staffpay.in`). Everything goes through the UI; the API is not
-used to set up or create data. Staff creation through the API exists in the Java
-suite (titanautomation) - that is a different thing and not what this repo tests.
+(`https://staging.staffpay.in`). Scope (agreed with the lead): **dashboard only -
+user creation, KYC documents being visible for each scenario, and the BGV
+dashboard.** The app is not tested here. The rider-app API is used only to put
+*test data* in place (the rider's selfie), never as a test step.
+
+## BGV costs money - read before running anything
+
+Every BGV that reaches **AuthBridge** (third party) is charged **Rs 20**.
+
+| Action | Starts a BGV? | Reaches AuthBridge (charged)? |
+|---|---|---|
+| Saving the Aadhaar only | no | no |
+| Saving Aadhaar **and** PAN (PAN "Update") | yes, automatically | normally no: a vendor-typed Aadhaar has no address, so it comes back **Insufficient at once** with no AuthBridge `request_id` |
+| **Retrigger BGV -> Address -> Initiate BGV** | yes | **yes - charged** |
+| The tests' "AuthBridge reports ..." step (`POST /webhook/authbridge/courtcase`) | no | no - it is a simulated result posted into staging |
+
+Rules:
+- **Never** run a BGV test, a probe, or the PAN Update without telling the user
+  what will be triggered, showing the screen and getting an explicit yes.
+- Tests that trigger a charged BGV: `amazon-bgv-*.e2e.spec.ts` and the 2nd test
+  in `create-amazon-staff.e2e.spec.ts`. Plain `npm test` / `test:watch` /
+  `test:amazon` run them, so don't run those casually either.
+- To check whether a BGV was charged: `rider_court_case_check` (entity_type
+  'USER', entity_value = users.id) - a row **with a `request_id`** reached AuthBridge.
+- Safe for verifying unrelated changes: the Blue Dart tests and
+  `tests/amazon-kyc-upload.e2e.spec.ts` (stops before the PAN Update).
 
 ## Layout
 
 ```
 pages/                    Page objects - all locators live here
-  LoginPage.ts            phone -> Get OTP -> OTP from DB -> Login -> T&C consent
+  LoginPage.ts            phone -> Get OTP -> OTP from DB -> Login -> T&C consent; loginAsOps(); logout()
   StaffListPage.ts        /staff listing, switchBranch(), openFromNav(), showCounts(), openKycPendingTab(), openAddStaff(), search()
-  StaffDetailsPage.ts     /staff/details/<user id> - opened by clicking a staff row
+  StaffDetailsPage.ts     /staff/details/<user id>: uploadKycDocuments(), saveAadhaarNumber(), savePanNumber(),
+                          retriggerBgvWithAddress() - opened by clicking a staff row
   AddStaffDialog.ts       "Add New Staff" dialog: Basic Info + Work Info tabs; submit() returns the server message,
                           submitForApproval() the Blue Dart BDR- ref
   ApprovalWorkflowPage.ts BD OPS "Approval Workflow" tab: Review -> Addition type -> Approve & Submit
 tests/
   auth.setup.ts           logs in once, switches branch, saves .auth/vendor.json
   login.spec.ts           fresh login (starts logged out)
-  add-staff.spec.ts       form checks, reuse the saved session
-  create-amazon-staff.e2e.spec.ts  Amazon: login -> branch -> Staff tab -> add staff -> list -> DB check
-  create-staff.e2e.spec.ts  Blue Dart: vendor adds staff -> OPS approves -> vendor finds staff
+  add-staff.spec.ts       Blue Dart form checks, reuse the saved session
+  create-staff.e2e.spec.ts         Blue Dart: vendor adds staff -> OPS approves -> vendor finds staff
+  amazon-kyc-upload.e2e.spec.ts    Amazon happy path, NO BGV: create Somesh -> selfie (API) -> Aadhaar + PAN images -> save Aadhaar
+  create-amazon-staff.e2e.spec.ts  Amazon: create + counts + DB + KYC Pending + detail page; 2nd test does KYC + BGV Clear (charged)
+  amazon-bgv-{discrepant,insufficient,attention-required}.e2e.spec.ts   BGV scenarios (charged)
+  support/bgvJourney.ts   shared BGV steps + useKycTestNumbers() (lock + document cleanup)
+  kyc.cleanup.ts          manual cleanup, `npm run cleanup:kyc`
   explore.spec.ts         scratch; skipped unless run with --debug
 utils/
-  config.ts               vendor number, branch, DB host/port/name (env-overridable)
-  db.ts                   MySQL pool + getStaffPayOtp(number, timeout, 'STAFFPAY'|'RIDERAPP') and getStaffRecord() (both poll up to 15s)
-  riderApi.ts             RiderApi: rider-app login (OTP) + fullProfile/save - acts as the new rider
+  config.ts               vendor / OPS numbers, branches, KYC numbers (from .env), DB host/port/name
+  db.ts                   MySQL pool, OTP lookup, getStaffRecord(), getUserDocument(), getCourtCase(),
+                          releaseTestKycNumbers() / deactivateTestRiderDocuments() / clearUserBlacklistForContact()
+  riderApi.ts             RiderApi: useGeneratedToken(), uploadImage(), uploadKycSelfie(), saveFullProfile() - test data only
+  authBridge.ts           simulated AuthBridge court-case result (webhook) with the vendor's token
+  testData.ts             KYC_IDENTITY (Somesh), buildAmazonStaff(), buildStaff() (Blue Dart), buildKycNumbers()
   secretStore.ts          DB username/password lookup (see "DB credentials")
-  testData.ts             buildAmazonStaff() / buildStaff() (Blue Dart) - unique phone per run
-  loginLock.ts            one OTP login at a time across workers
+  loginLock.ts            cross-worker locks: one OTP login per number, one KYC test at a time
   recordingsReporter.ts   copies videos to reports/recordings/<run time>/
+test-assets/              Somesh_adhaarFront.png, Somesh_adhaarBack.png, Somesh_pan.png, Somesh_profile.png
 ```
 
 ## Test projects (playwright.config.ts)
@@ -51,14 +87,17 @@ utils/
 | `setup`    | `*.setup.ts`                 | logs in, writes `.auth/vendor.json` | -       |
 | `chromium` | everything except `*.e2e.spec.ts` | reuses `.auth/vendor.json`   | `setup`    |
 | `Staff Creation` | `*.e2e.spec.ts`         | starts logged out, logs in itself | -          |
+| `KYC Cleanup` | `*.cleanup.ts`            | no browser                       | -          |
 
-`Staff Creation` has no dependencies on purpose: running
-`tests/create-staff.e2e.spec.ts` (from the CLI or the VS Code play button) runs
-only that one journey in one browser. It gets a 90s timeout (180s with SLOW_MO).
+`Staff Creation` has no dependencies on purpose: running one `*.e2e.spec.ts`
+file (CLI or the VS Code play button) runs only that journey in one browser.
+Timeout 180s (360s with SLOW_MO); actions time out after 15s (30s with SLOW_MO).
 
 Two logins for the same number at once would each request an OTP and one would
 read the other's and fail. `LoginPage.login` holds a lock (`utils/loginLock.ts`,
-a directory in the OS temp folder) so parallel logins take turns.
+a directory in the OS temp folder) so parallel logins take turns. A second
+lock, `kyc-test-numbers`, lets only one Amazon KYC test use the identity's
+numbers at a time (stale after 15 min).
 
 `chromium` depends on `setup`, and dependency projects ignore CLI filters, so
 `-g` on a chromium test still runs the setup login first.
@@ -68,30 +107,34 @@ a directory in the OS temp folder) so parallel logins take turns.
 Prerequisites:
 - `npm install`
 - **SSH tunnel to staging MySQL on `127.0.0.1:3306`** - login reads the OTP
-  from the `titan` DB. Tunnel down -> `ECONNREFUSED 127.0.0.1:3306` in setup and
-  every dependent test is skipped.
+  from the `titan` DB. Tunnel down -> `ECONNREFUSED 127.0.0.1:3306`; stale ->
+  `ETIMEDOUT`. Restart it.
 - DB credentials available (see below).
-- Don't log in with the test vendor number in your own browser during a run -
-  it can consume the OTP.
+- `cp .env.example .env` - it has the DB host/port/name and the KYC identity's
+  (Somesh's) `AADHAAR_TEST_NUMBER` / `PAN_TEST_NUMBER`. `.env` itself is
+  gitignored; DB credentials never go in either file.
+- `~/.titanautomation-secrets.json` (DB credentials, shared privately - same
+  file titanautomation uses). Never commit it.
+- Don't log in with a test number in your own browser during a run - it can
+  consume the OTP.
+- Don't run this suite and titanautomation at the same time if both use the
+  same identity: each run deactivates the identity's documents on every rider.
 
 | Command | What it does |
 |---|---|
-| `npm test` | Full suite, headless |
-| `npm run test:watch` | Headed, one window, `SLOW_MO=600` so you can follow along |
-| `npm run test:amazon-staff-creation` | Only the Amazon create-staff journey, headed + slow |
-| `npm run test:staff-creation` | The Blue Dart journey (vendor adds -> OPS approves -> vendor finds), headed + slow |
-| `npm run test:amazon` | All Amazon journeys, one worker, then builds the Allure report (keeps the test exit code) |
-| `npm run test:no-auth` | `chromium` project only, reusing the saved session instead of logging in again (`login.spec.ts` still needs the tunnel) |
-| `npx playwright test -g "<name>"` | One test by name |
-| `npx playwright test -g "<name>" --debug` | Step through with the inspector |
-| `npm run test:amazon-bgv-discrepant` | Only the negative BGV (Discrepant) journey, headed + slow |
-| `npm run test:amazon-bgv-insufficient` | Only the Insufficient BGV journey, headed + slow |
-| `npm run test:amazon-bgv-attention-required` | Only the Attention Required BGV journey, headed + slow |
-| `npm run cleanup:kyc` | Deactivate Aadhaar / PAN rows of all Auto QA test riders |
-| `npm run allure` | Generate + open the Allure report of the last run |
-| `npm run report` | Open Playwright's HTML report |
+| `npm test` | Full suite, headless - **includes the charged BGV tests** |
+| `npm run test:watch` | Same, headed, one window, `SLOW_MO=600` - **includes BGV tests** |
+| `npm run test:staff-creation` | Blue Dart journey (vendor adds -> OPS approves -> vendor finds), headed + slow |
+| `npx playwright test tests/amazon-kyc-upload.e2e.spec.ts --headed` | Amazon happy path without BGV (safe) |
+| `npm run test:amazon` / `test:amazon:headed` | All Amazon journeys, one worker, then the Allure report - **charged** |
+| `npm run test:amazon-bgv-discrepant` / `-insufficient` / `-attention-required` | One BGV scenario - **charged** |
+| `npm run test:no-auth` | `chromium` project only, reusing the saved session |
+| `npx playwright test -g "<name>"` / `--debug` | One test by name / step through with the inspector |
+| `npm run cleanup:kyc` | Deactivate Aadhaar / PAN rows of all test riders (numbers starting 421) |
+| `npm run allure` / `npm run report` | Allure report / Playwright HTML report of the last run |
 
-`SLOW_MO` raises the per-test timeout from 30s to 120s automatically.
+Headless is the default (Chrome doesn't open); add `--headed` or use the
+`test:watch` / `test:*` scripts to watch.
 
 ## Reports and recordings
 
@@ -106,244 +149,159 @@ reports/
   test-output/        Playwright's raw output (wiped each run)
 ```
 
-Video is recorded for every test (`video: 'on'`), screenshots on failure. The
-Allure report has the video attached to each test as well. Allure CLI needs
-Java; `allure` is installed via Homebrew.
+Video for every test, screenshots on failure, both attached in Allure.
+`amazon-kyc-upload` also attaches a numbered screenshot per step (01 ... 07).
+Allure CLI needs Java (`allure` via Homebrew).
 
 ## DB credentials
 
-`utils/secretStore.ts` mirrors titanautomation's `SecretStore.java` so both
-suites share one source. Per key (`titan_username`, `titan_password`), first hit wins:
+`utils/secretStore.ts` mirrors titanautomation's `SecretStore.java`. Per key
+(`titan_username`, `titan_password`), first hit wins:
 
 1. environment variable of the same name
 2. `~/.titanautomation-secrets.json` (chmod 600, outside the repo) - how local runs work
 3. AWS Secrets Manager `secret/application/titanautomation-staging` in `ap-south-1`
 
-Human AWS users are explicitly denied that secret by `LSN-Human-Baseline`, so on a
-laptop you need the local file. Jenkins nodes (the rider-app-automation job) read it
-through their instance role. `.env` only needs `DB_HOST`/`DB_PORT`/`DB_NAME` if
-they differ from the defaults - never put credentials in the repo.
+Human AWS users are denied that secret by `LSN-Human-Baseline`, so laptops use
+the local file; Jenkins nodes read it through their instance role.
 
-## Amazon Now flow (active)
+## Logins
 
-Vendor **`9843996388`**, branch **Amazon Tez Bangalore** (org id
-162002152849268) - both in `config.amazon`, overridable with
-`AMAZON_VENDOR_NUMBER` / `AMAZON_BRANCH`. Test: `tests/create-amazon-staff.e2e.spec.ts`.
+| Login | Number | Lands on |
+|---|---|---|
+| Blue Dart vendor | `9519519514` (`VENDOR_NUMBER`) | Bluedart_Onboarding (org 579), staff list, T&C consent every login |
+| BD OPS | `2288777001` (`OPS_NUMBER`) | `/rider-management`, Approval Workflow tab, no consent |
+| Amazon Now vendor | `9843996388` (`AMAZON_VENDOR_NUMBER`) | Amazon Tez Bangalore (org 162002152849268), `/ev-sp`, no consent |
 
-Journey, as done by hand:
+OTPs come from `otp_details` (newest non-validated row, `event_type` STAFFPAY).
 
-1. Log in with OTP. **No Terms & conditions screen** for Amazon, so call
-   `login(number, { consent: false })`. Login lands on **`/ev-sp`**, not `/staff`.
-2. Click the org name top-left ("Amazon Tez Bang...") -> Switch Branches ->
-   **Amazon Tez Bangalore** (`StaffListPage.switchBranch`, waits for PUT `/orgs/<id>`).
-3. Click the **Staff** tab in the header (`StaffListPage.openFromNav`).
-4. **Add Staff** -> Basic Info (`AddStaffDialog.fillAmazonBasicInfo`):
+## Amazon KYC identity - Somesh
 
-   | Field | Value | API field in `POST /org/staff/` |
-   |---|---|---|
-   | Staff Name | `Auto QA amzuser <3 random digits>` | name |
-   | Staff Type | Delivery Boy (other option: Security) | staffType 1 |
-   | Phone Number | 10 digits starting **421** (last 7 from the clock) | contactNumber |
-   | Date of Join | today - required; empty shows "Invalid date format" | joiningDateEpochMillis |
-   | Date of Birth | 15 Jan 1995 | dateOfBirthEpochMillis |
-   | Vehicle Type | Bike (BIKE_AMZ, vehicle number mandatory) | vehicleTypeId 18 |
-   | Vehicle Number | same as phone (appears after Vehicle Type) | vehicleNumber |
-   | Source | Referral | userCreationSourceId 33 |
+Like titanautomation, one person's details, selfie and documents always go
+together, so name / DOB / face line up. `KYC_IDENTITY` in `utils/testData.ts`:
 
-   Selfie / Track & Trace / Geofence checkboxes are pre-ticked - leave them.
-   **Work Info is locked until Source is chosen** (a "Source of Delivery Boy"
-   popup blocks the dialog otherwise).
-5. Work Info (`fillAmazonWorkInfo`) - each choice reveals the next field:
+- **Somesh Mallick**, DOB **05/01/1976** (as on his Aadhaar and PAN), male.
+- Selfie `test-assets/Somesh_profile.png`; documents `Somesh_adhaarFront.png`,
+  `Somesh_adhaarBack.png`, `Somesh_pan.png`.
+- Aadhaar / PAN numbers: `.env` (`AADHAAR_TEST_NUMBER`, `PAN_TEST_NUMBER`, copied from `.env.example`);
+  `buildKycNumbers()` throws if either is missing.
+- Every Amazon rider (`buildAmazonStaff()`) is created as Somesh with a unique
+  10-digit phone starting **421** (not a real mobile range). The 421 prefix is
+  what marks a rider as this suite's for the per-rider cleanup.
 
-   | Field | Value | API field |
-   |---|---|---|
-   | Select Business Type | FOOD (also ECOM, STORE) | - |
-   | Select Business | Amazon (the client) | - |
-   | Hub Name (unlabelled select) | **TBI1_AMZ HSR Store** (Dedicated Slot) | hubId 1048 |
-   | Shift ("Rider will choose from rider app") | **TEST Full Day** 18:00-23:59 - optional for dedicated-slot hubs, picked to match manual runs | shiftTimingIds [1719] |
-   | Select Zones* | **Koramangala and HSR** - required | zoneId [16866] |
+History: Charles (titanautomation's identity) was tried first and removed;
+before that, generated "SAMPLE" images and the team test numbers were used -
+staging approved them, but rider and documents didn't match and the selfie step
+never ran, so the tests passed without testing anything real.
 
-   Salary Info defaults (Workbasis) are fine - not touched.
-   **Before adding**, click **Show Count** on the summary cards and note
-   Total Staffs and KYC Pending (`StaffListPage.showCounts`).
-6. Submit (waits for `POST /org/staff/`).
-7. **DB check** (`getStaffRecord`, joins users + user_info + hubs +
-   vehicle_types + staff_types). Also: contact_number, staff_type 1,
-   salary_type 4 (Workbasis), selfie / track & trace / geofence = 1,
-   doj = today (IST), bgv_status NULL before KYC:
-   - `titan.users`: `status = 'APPROVED'`, `is_active = 1`, name matches.
-     `is_active` is BIT(1) - mysql2 returns a Buffer, read byte 0.
-   - `titan.user_info` (on `user_id`): hub = TBI1_AMZ HSR Store, vehicle type
-     Bike, vehicle number = phone, staff type Delivery Boy, `staff_unique_id` set.
-   - user org id == hub org id.
-   - The test adds a **"Created staff"** annotation (name, phone, user_id,
-     staff_unique_id) to the Playwright/Allure report.
+## Amazon Now flow
 
-7b. **Rider saves a profile picture (rider-app API)** - `RiderApi`:
-   `GET /auth/sendOtp/<phone>?source=RiderApp&paramType=installParams` ->
-   OTP from `otp_details` with **`event_type = 'RIDERAPP'`** -> `POST /auth/login`
-   (`loginFrom: RiderApp`, `referenceId` from sendOtp) -> `response.token` ->
-   **upload** (`RiderApi.uploadImage`): `GET /orgs/presigned-urls?fileName=&fileType=png&contentType=image/png`
-   (rider `authtoken`) -> `response.presignedUrl` -> `PUT` the file there with only
-   `Content-Type` -> image link = presignedUrl without the query string (server
-   picks the key, e.g. `earn-de-docs.s3.../1790861171476_4d200e6bb5d3.png`) ->
-   `POST /de/user/fullProfile/save` with `authtoken` + `userid` headers and
-   name, dob (`15-Jan-1995`), `s3ProfileLink`, address, pincode, emergency contact.
-   DB: `users.s3_profile_link` = the link; `user_info.address / pincode /
-   emergency_contact_*` = what was sent; the link answers 200 image/png. Login
-   follows titanautomation's `SelfieUploadAPI`. The image is
-   `test-assets/qa-test-profile.png` (`TEST_PROFILE_IMAGE_FILE`), a generated
-   placeholder - **never a real rider's picture, never a token from a pasted curl.**
-   OTP lookup: staging updates the OTP row in place on resend, so take the newest
-   non-validated row - don't filter on "id newer than before".
-   **KYC selfie (what the vendor portal shows under "Selfie"):** upload a
-   *second* image - `TEST_SELFIE_IMAGE_FILE`: the placeholder unless
-   `SELFIE_IMAGE=<path>` is set for that run (only a face whose owner agreed;
-   `test-assets/private/` is gitignored for such files, nothing there is
-   picked up automatically) - then `RiderApi.uploadKycSelfie(link)` -> `POST /de/user/kyc`
-   step `SELFIE_UPLOAD` (body as titanautomation `fixtures/titan/selfie_upload.json`).
-   DB check (`getUserDocument(userId, 'SELFIE', 'PENDING_APPROVAL')`):
-   - `titan.entity_documents` row: `entity_type = 'USER'`, `entity_id = users.id`,
-     `doc_type = 'SELFIE'`, `is_active = 1`, `auto_kyc_broker = 'HYPERVERGE'`.
-     **fullProfile/save creates it** (`CREATED`, `doc_link` = profile picture);
-     the KYC selfie moves it to **`PENDING_APPROVAL`** and leaves `doc_link` alone.
-   - `users.s3_profile_link` is overwritten with the **selfie** link.
-   - History is in `entity_document_logs` (by `entity_document_id`).
-   - Re-sending the profile picture's link as the selfie leaves the row at
-     `CREATED` - the selfie must be its own upload.
-   Portal: the detail page shows `<img src="<selfie link>">` under Selfie
-   (`StaffDetailsPage.selfieImage`). **Open the detail page from the staff list** -
-   going to `/staff/details/<id>` directly calls `/org/staff/undefined/kyc`
-   and every KYC section shows "-".
-8. **Counts went up:** reload `/staff` (the cards don't refresh themselves),
-   Show Count again - Total Staffs and KYC Pending must both be higher. Asserted
-   as "greater than", not "+1", because staging is shared; in practice it's +1.
-9. **KYC Pending tab:** click the KYC Pending card - it filters the list
-   (`filterStatus: "KYC PENDING"` on `/org/staff/all/v2`). Search the phone ->
-   the new staff row appears.
-10. **Detail page:** click the row -> `/staff/details/<users.id>`. Check the
-    name, "KYC Pending", the staff_unique_id, the phone and the selfie image. Each part of the
-    `| <staff_unique_id> | <phone> | BIKE_AMZ | DOB : ...` line is its own element.
+Test: `tests/amazon-kyc-upload.e2e.spec.ts` (happy path, no BGV). Steps:
 
-11. **Sample Aadhaar / PAN upload** on the detail page
-    (`StaffDetailsPage.uploadKycDocuments(SAMPLE_KYC_DOCUMENTS)`): three hidden
-    `<input type=file>` (Aadhaar front, Aadhaar back, PAN, in page order) that
-    disappear once filled - fill from the last backwards. The page uploads to the
-    **restricted** bucket: `GET /orgs/presigned-urls?...&flowType=KYC` -> PUT to
-    `earn-de-docs-restricted`. Check: each PUT is 200 and 3 more
-    `img[alt=uploaded-url]` previews appear (the selfie uses the same alt).
-    **Nothing reaches entity_documents yet** - that needs the number + Save
-    (Aadhaar) / Update (PAN), which wait for staging test numbers from the
-    backend team. Images are `test-assets/sample-*.png`, generated "SAMPLE - TEST
-    ONLY" cards; never real ID images or numbers.
+1. Log in as `9843996388` (`login(number, { consent: false })`), switch branch
+   to **Amazon Tez Bangalore**, open the **Staff** tab (`openFromNav`).
+2. **Add Staff** -> Basic Info (`fillAmazonBasicInfo`): name + DOB from
+   KYC_IDENTITY, Staff Type Delivery Boy, phone 421..., Date of Join today,
+   Vehicle Type Bike (vehicle number = phone), Source Referral. Work Info is
+   locked until Source is chosen.
+3. Work Info (`fillAmazonWorkInfo`): Business Type FOOD -> Business Amazon ->
+   Hub **TBI1_AMZ HSR Store** -> Shift **TEST Full Day** -> Zone
+   **Koramangala and HSR**. Submit waits for `POST /org/staff/`.
+4. DB: `users` APPROVED / active, name matches (`getStaffRecord`). Amazon staff
+   are created immediately (no approval queue) and start as **KYC Pending**.
+5. **Selfie (test data, rider-app API)** - the titanautomation way:
+   `RiderApi.useGeneratedToken(userId, phone)` -> `POST /auth/generate-token`
+   `{ userId, leadId: 0, contactNumber }` returns the rider's token with **no
+   OTP and no app-version check** (titanautomation `TitanAPI.generateToken`).
+   Then `uploadImage(Somesh_profile.png)` (presigned S3 PUT) and
+   `uploadKycSelfie(link)` -> `POST /de/user/kyc` step SELFIE_UPLOAD (body as
+   titanautomation `fixtures/titan/selfie_upload.json`). Result: SELFIE row in
+   `entity_documents` (PENDING_APPROVAL, HYPERVERGE) and `users.s3_profile_link`
+   set; the detail page shows the selfie.
+   - The OTP login (`/auth/sendOtp` + `/auth/login`, titanautomation
+     `SelfieUploadAPI.signUpAndLoginViaAPI`) is **refused by staging** ("Please
+     update the Rider app to the latest version") whatever `appv` is sent
+     (12.25, 12.34, even 99.0) - don't use it.
+   - Inserting the SELFIE row straight into the DB also works but skips the
+     backend; use the API.
+6. Open the rider **from the list** (search the phone, click the row) - going to
+   `/staff/details/<id>` directly leaves every KYC section empty.
+7. Upload Aadhaar front, back and PAN images (`uploadKycDocuments`): three
+   hidden `<input type=file>` that disappear once filled - fill from the last
+   backwards. Uploads go to the restricted S3 bucket; nothing reaches
+   `entity_documents` until a number is saved.
+8. Type the Aadhaar number -> **Save** (`saveAadhaarNumber`). Expect an
+   `AADHAR` row **APPROVED** ("Manually Verified"). The test fails on
+   `DUPLICATE_REJECTED` ("Documents are linked to another user").
+9. **Stop.** The PAN Update would start a BGV (see "BGV costs money").
 
-12. **KYC test** (2nd test in the file, `describe.configure({ mode: 'serial' })`,
-    works on the rider test 1 created via module-level `created`): log in, open
-    the rider from the list, upload the 3 samples, type the Aadhaar number ->
-    **Save**, re-upload PAN (Aadhaar Save reloads the section and drops the
-    unsaved PAN image/number) -> type PAN -> **Update**, then **Approve** both.
-    Save/Update stay disabled with files only - a number is required. Writes go
-    to `POST /org/staff/<id>/kyc`. Numbers: `buildKycNumbers()` - see "Amazon KYC
-    test numbers" below. Soft assertions.
-    **Fails on staging today (bugs, 2026-10-07):** Aadhaar Save -> `AADHAR`
-    row straight to `APPROVED` ("Manually Verified"), `doc_link` null, later
-    `reject_reason = 'Face Match Failed'` while still APPROVED; Approve stays
-    disabled. PAN Update -> API says SUCCESS but no `PANCARD` row. No DOB /
-    Father's Name fields exist for this org (those are Blue Dart).
-    **Setup / cleanup:** every KYC file calls `useKycTestNumbers()`
-    (tests/support/bgvJourney.ts) - see "Amazon KYC test numbers".
-    **BGV** (same KYC test, after Approve): approved Aadhaar + PAN start the
-    background verification. Checks, INITIATED stage: `entity_documents`
-    PANCARD `dl_case_check = 'INITIATED'`; `rider_court_case_check` row
-    (`entity_type='USER'`, `entity_value=users.id`) `case_status='WorkInProgress'`;
-    `user_info.bgv_status='INITIATED'`; UI timeline "Background Verification
-    Initiated". Then `RiderApi.completeCourtCase()` plays AuthBridge:
-    `POST /webhook/authbridge/courtcase` {uniqueID, requestId (from that row),
-    caseStatus Complete, State Final, caseSeverity Clear, checks[...]} with the
-    **rider's own authtoken** (no token -> 401 "Token not found"). VERIFIED
-    stage: court case Complete/Final/Clear, `dl_case_check='VERIFIED'`,
-    `bgv_status='VERIFIED'`, UI shows "Verified". The cleanup must run after
-    this - an inactive PAN row is not updated to VERIFIED. Org-level
-    `/bgv-tracking` page exists for some orgs ("BGV Tracking" tab).
-    **Negative BGV test** (`tests/amazon-bgv-discrepant.e2e.spec.ts`,
-    `npm run test:amazon-bgv-discrepant`): new rider -> profile + selfie ->
-    Aadhaar/PAN saved -> Initiate (PAN card button; only enabled while
-    dl_case_check is empty / INITIATION_FAILED - the PAN Update normally starts
-    BGV itself, so it's usually disabled) -> INITIATED checks -> webhook with
-    `caseSeverity: 'Discrepant'` (`completeCourtCase(ids, 'Discrepant')`).
-    After Discrepant: `users.status = 'REJECTED'` (is_active stays 1),
-    `user_info.bgv_status = 'FAILED'`, court case Complete/Discrepant/Final,
-    AADHAR + PANCARD `approval_status = 'REJECTED'`, `dl_case_check = 'FAILED'`,
-    UI "Discrepancy" + "Manually Rejected".
-    **Discrepant blacklists the documents** (`entity_documents.is_blacklisted
-    = 1`, reject_reason "Blacklisted document"): any later rider saving the same
-    numbers is REJECTED at once. Its afterAll therefore also clears
-    is_blacklisted (`deactivateTestRiderDocuments(.., { unblacklist: true })`).
-    Staging only accepts known test Aadhaar numbers ("Please enter valid Aadhar
-    number" for others, even checksum-failing look-alikes) - use the .env ones.
-    **Insufficient test** (`tests/amazon-bgv-insufficient.e2e.spec.ts`,
-    `npm run test:amazon-bgv-insufficient`): same journey, then the webhook
-    with `caseStatus Complete, State Interim, caseSeverity Insufficient`,
-    check severity "" (`completeCourtCase(ids, 'Insufficient')`). Expected
-    (from staging data + UI code, not yet seen end-to-end): court case
-    Complete/Insufficient/Interim, `bgv_status` and PAN `dl_case_check`
-    'Insufficient', rider + documents stay APPROVED, nothing blacklisted, UI
-    "Insufficient". The test records the observed values before asserting.
-    **Attention Required test** (`tests/amazon-bgv-attention-required.e2e.spec.ts`,
-    `npm run test:amazon-bgv-attention-required`): webhook `Complete / Final /
-    caseSeverity "Attention Required"`, check severity Clear. Dashboard: BGV
-    Tracking bucket ATTENTION_REQUIRED with an "Override" button. Staging's two
-    older cases disagree (hand-edited), so the test asserts the court case
-    (Complete / Attention Required / Final), bgv_status no longer INITIATED and
-    the UI label, and records users / user_info / documents for review.
-    Severities covered: Clear (flow 1), Discrepant, Insufficient, Attention Required.
-    Shared steps for the negative tests: `tests/support/bgvJourney.ts`
-    (`createRiderWithBgvInitiated`, `reportCourtCase`, `reopenRider`).
-    **BGV needs a PAN staging accepts.** With made-up PANs, Update returns
-    SUCCESS but no PANCARD row is saved - `kyc_error_logs` shows
-    `REGEX_FAILED` "PAN regex validation failed" (4th letter must be a holder
-    type P/C/H/F/A/T/B/L/J/G; our safe PAN uses E) - so BGV never starts - every BGV step
-    (flow 1 KYC test, Discrepant, Insufficient) needs staging test numbers from
-    the backend team / HyperVerge in .env. Never a real person's numbers.
-    Image paths can be overridden per run: PROFILE_IMAGE, SELFIE_IMAGE,
-    AADHAAR_FRONT_IMAGE, AADHAAR_BACK_IMAGE, PAN_IMAGE.
-    **Cleanup deactivates AADHAR and PANCARD only** (`TEST_RIDER_DOC_TYPES` in
-    utils/db.ts) - every test's afterAll and `npm run cleanup:kyc`. The SELFIE
-    row stays active on purpose.
-    `npm run test:amazon` runs all 5 Amazon tests one at a time with the safe
-    numbers / images baked in, then generates the Allure report.
-    **No rider-app login by default** (this is dashboard automation):
-    `config.riderAppSteps` (RIDER_APP_STEPS=true to enable) gates the profile
-    picture + KYC selfie steps; otherwise they're skipped. The AuthBridge
-    webhook uses the **vendor's** dashboard token (`utils/authBridge.ts`:
-    `vendorAuthToken(page)` reads `authtoken` off a dashboard request,
-    `reportCourtCaseResult(...)` posts the result).
-    **Rider-app version:** staging refuses sendOtp from old app versions
-    ("Please update the Rider app to the latest version", 400). `RiderApi`
-    sends appv 12.34 / build 345 (12.33 and below refused on 2026-10-16);
-    override with RIDER_APP_VERSION / RIDER_APP_BUILD. Recent versions in use:
-    `SELECT app_version, COUNT(*) FROM user_device_details WHERE updated_at >
-    NOW() - INTERVAL 3 DAY GROUP BY 1`.
-    **Standalone:** `npm run cleanup:kyc` (project "KYC Cleanup",
-    `tests/kyc.cleanup.ts`, `deactivateAllTestRiderKycDocuments()`) deactivates
-    every active AADHAR / PANCARD row on any "Auto QA amzuser" rider - use after
-    an interrupted run or a DUPLICATE_REJECTED. Skips unless RUN_KYC_CLEANUP=true
-    (the npm script sets it), so a full `npm test` never runs it mid-suite.
-    `doc_number` is stored in plain text, so rows can be matched by number.
+Behaviour seen on staging:
+- **Face match runs on the vendor path.** Saving the Aadhaar runs a HyperVerge
+  face match against the selfie. Saved **without a selfie**, the Aadhaar row
+  is deactivated about 20s later ("Face Match Failed"). With a selfie it stays
+  active, but still says "Face Match Failed" with no score - because the
+  uploaded images are never linked to the saved row (`doc_link` null), so
+  there is no document photo to compare. **Dev bug.**
+- Saving the Aadhaar reloads the KYC section and drops an unsaved PAN image
+  and number - re-upload / retype before Update (`enterNumberAndSubmit`
+  retypes until the button is enabled).
+- Save / Update approve the document straight away; Approve may look enabled
+  but sends nothing, so tests only click it for a document not yet APPROVED.
 
-Show Count: one click loads all three cards from `POST /org/staff/all/count/v2`;
-the buttons are then replaced by numbers (label `<p>` followed by number `<p>`).
-The test annotates "Counts before" / "Counts after" in the report.
+## Document cleanup (duplicates and blacklisting)
 
-Amazon staff are created immediately - no approval queue, and they start as **KYC Pending**. Every run creates a
-real "Auto QA amzuser NNN" delivery boy on staging.
+Staging rejects a save when the number is **active on another rider**
+(`DUPLICATE_REJECTED`) or **blacklisted** (after a Discrepant verdict). Every
+Amazon KYC test therefore frees the identity's numbers - the same cleanup as
+titanautomation's `DbConnect.updateEntityDocsKYC` + `clear_the_blacklisted_documents`.
 
-Reference manual request (from the browser, 2026-09-30):
-`POST https://api-staging.staffpay.in/org/staff/` with the fields above plus
-`selfieEnabled/trackAndTraceEnabled/geofenceAutoApproval: true`, `salaryType: 4`,
-`staffCreatedSoruce: "CREATE_STAFF"`. List: `POST /org/staff/all/v2`
-`{"pageNo":1,"pageSize":10,"searchText":"<phone>"}`. Never copy an `authtoken`
-from a pasted curl into the repo - the tests log in through the UI.
+`releaseTestKycNumbers([aadhaar, pan])` (utils/db.ts):
+
+| Table | Change |
+|---|---|
+| `entity_documents` | `is_active = 0` on **every** active row with these `doc_number`s, **whoever holds them** (manual riders like "test 123", other suites) - the duplicate check only looks at active rows; `is_blacklisted = 0` |
+| `user_blacklist` | `is_black_listed = 0` by `aadhaar_number` (a Discrepant leaves rows that block the Aadhaar for every future rider) |
+| `entity_document_logs` | **not touched** - history only, no part in the check |
+
+Where it runs:
+- `amazon-kyc-upload`: `beforeAll` (lock + free). Leaves the rider's documents
+  in place afterwards so they can be checked on the dashboard.
+- BGV files: `useKycTestNumbers()` (tests/support/bgvJourney.ts) - `beforeAll`
+  lock + free; `afterAll` (pass or fail) deactivates + un-blacklists the
+  rider's own AADHAR/PANCARD (`deactivateTestRiderDocuments`, 421 riders only),
+  clears `user_blacklist` by its contact, frees the numbers again, releases the lock.
+- `npm run cleanup:kyc`: deactivate AADHAR/PANCARD on all 421 riders.
+
+`doc_number` is plain text, so rows match by number. Tables that hold these
+numbers on staging: `entity_documents`, `entity_document_logs`, `user_blacklist`.
+
+## Amazon BGV (charged - ask first)
+
+- BGV starts as soon as Aadhaar + PAN are saved, but a vendor-typed Aadhaar
+  has no address, so it comes back **Insufficient at once** (court case
+  `Insufficient`, `bgv_status = 'Insufficient'`, no `request_id`) without
+  reaching AuthBridge - titanautomation's "Aadhaar has no address" case.
+- **Retrigger BGV** on a freshly opened detail page -> "Retrigger Background
+  Verification" dialog -> Address* -> **Initiate BGV** sends it to AuthBridge
+  (**charged**): PAN `dl_case_check = INITIATED`, court case `WorkInProgress`,
+  `bgv_status = INITIATED` (`retriggerBgvWithAddress`, `TEST_BGV_ADDRESS`).
+  titanautomation does the same via `POST /org/staff/bgv/manual/trigger`.
+- The Pan Card's **Initiate** button is not BGV - it calls
+  `/dl/verification/existing/user`.
+- The tests then post a simulated AuthBridge result
+  (`reportCourtCaseResult`, `POST /webhook/authbridge/courtcase` with the
+  case's uniqueID / requestId and the vendor's token):
+  - **Clear** -> court case Complete/Final/Clear, `dl_case_check` and
+    `bgv_status` VERIFIED, UI "Verified".
+  - **Discrepant** -> `users.status` REJECTED, `bgv_status` FAILED, AADHAR +
+    PANCARD REJECTED, documents **blacklisted**, UI "Discrepancy" / "Manually Rejected".
+  - **Insufficient** (interim) -> stored on the court case
+    (Complete/Insufficient/Interim) but BGV stays `INITIATED`, rider stays
+    approved, UI still "Background Verification Initiated" (confirm with
+    product whether Insufficient should show).
+  - **Attention Required** -> court case Complete/Final/Attention Required.
+- Shared steps: `tests/support/bgvJourney.ts` (`createRiderWithBgvInitiated`,
+  `reportCourtCase`, `reopenRider`).
 
 ## Blue Dart flow
 
@@ -352,150 +310,58 @@ Blue Dart (`9519519514`, Bluedart_Onboarding, org 579) puts new staff in
 `request_ref` like `BDR-XXXXXXXXXXXX`, returned in the create reply
 (`PENDING_REQUEST_APPROVAL — BDR-...`, `AddStaffDialog.submitForApproval()`).
 There is no `titan.users` row, and so nothing in the staff list, until BD OPS
-(`2288777001`, `OPS_NUMBER`) approves it in **Approval Workflow -> Review ->
-Addition type "New Addition" -> Approve & Submit** (`ApprovalWorkflowPage`).
+(`2288777001`) approves it in **Approval Workflow -> Review -> Addition type
+"New Addition" -> Approve & Submit** (`ApprovalWorkflowPage`).
 `create-staff.e2e.spec.ts` does vendor -> OPS -> vendor in one browser, logging
 out between (`LoginPage.logout`, `loginAsOps`). titanautomation approves the
 same request via `POST /bluedart/approval-requests/{ref}/approve`.
-Hub "tEst BD hub" / shift "TEST SHIft" work again (2026-10-19); on 2026-09-30
-staging briefly rejected that hub ("Could not resolve the store for this rider").
 After the OPS login, Rider Management loads behind a full-page spinner that
-can swallow clicks for a while - `ApprovalWorkflowPage.open` retries for 60s.
+can swallow clicks - `ApprovalWorkflowPage.open` retries for 60s. Status filter
+buttons carry a live count ("Pending 45") - match by prefix.
 
-## Amazon KYC test numbers
-
-Mirrors titanautomation's Amazon BGV tests (one fixed test identity per run,
-blacklisting cleared before and after):
-
-- **Aadhaar:** the team's fixed staging test number, `AADHAAR_TEST_NUMBER` in
-  `.env` (gitignored; never commit, log or report it). Made-up numbers fail
-  staging's checksum check ("Please enter valid Aadhar number").
-- **PAN:** the team's staging test PAN, `PAN_TEST_NUMBER` in `.env` - required
-  in practice. Staging verifies PANs and **silently drops** one that fails:
-  PAN Update answers `SUCCESS` but no `PANCARD` row is written (seen with the
-  old `BBAEA9000M` and with generated PANs since ~2026-10-08). Unset, a PAN is
-  generated (4th letter E, never a real PAN) and the journey fails at the PAN
-  check with a message saying this. Never use a real person's PAN - the
-  titanautomation "Charles" numbers are real documents.
-- If the test PAN is active on a rider outside this suite (e.g. a manual
-  "test 123" rider), the save is dropped as a duplicate; the cleanup only
-  touches "Auto QA amzuser %" riders, so free it by hand (deactivate that
-  one `entity_documents` row) after checking with whoever owns the rider.
-- **`useKycTestNumbers()`** (in each KYC file): `beforeAll` takes the
-  `kyc-test-numbers` lock (`utils/loginLock.ts`; one KYC test at a time across
-  workers, stale after 15 min) and frees the fixed numbers
-  (`releaseTestKycNumbers`: `entity_documents.is_blacklisted = 0` by
-  `doc_number`, deactivate rows still held by "Auto QA amzuser %" riders,
-  `user_blacklist.is_black_listed = 0` by `aadhaar_number`). `afterAll`, pass or
-  fail: deactivate and un-blacklist the rider's own AADHAR/PANCARD rows, clear
-  `user_blacklist` by its contact, free the numbers again, release the lock.
-  The `user_blacklist` part is what titanautomation's
-  `clear_the_blacklisted_documents` does; without it a Discrepant run blocks
-  the test Aadhaar for every later rider.
-- Saving Aadhaar + PAN on the vendor portal approves both straight away
-  ("Manually Verified"); Approve may still look enabled but sends nothing, so
-  the tests only click it for a document that isn't APPROVED yet.
-
-## Amazon BGV start
-
-- BGV starts as soon as Aadhaar + PAN are saved, but a vendor-typed Aadhaar
-  has no address, so it comes back **Insufficient at once** (court case
-  `Insufficient`, `user_info.bgv_status = 'Insufficient'`) without reaching
-  AuthBridge - the case titanautomation's "Aadhaar has no address" test
-  covers.
-- **Retrigger BGV** on the detail page (fresh page load) -> "Retrigger
-  Background Verification" dialog -> Address* -> **Initiate BGV** sends it to
-  AuthBridge: PAN `dl_case_check = INITIATED`, court case `WorkInProgress`,
-  `bgv_status = INITIATED` (`StaffDetailsPage.retriggerBgvWithAddress`,
-  address `TEST_BGV_ADDRESS`). titanautomation does the same via
-  `POST /org/staff/bgv/manual/trigger`.
-- The Pan Card's **Initiate** button is not BGV - it calls
-  `/dl/verification/existing/user`.
-- An **interim Insufficient** AuthBridge result is stored on the court case
-  (`Complete` / `Insufficient` / `Interim`) but does not conclude BGV:
-  `bgv_status` and PAN `dl_case_check` stay `INITIATED`, the UI still says
-  "Background Verification Initiated" (observed 2026-10-19; confirm with
-  product if Insufficient should show on the rider).
-
-- KYC sample images: `test-assets/sample-aadhaar-front.png`,
-  `sample-aadhaar-back.png`, `sample-pan.png` - generated, marked
-  "SAMPLE - TEST ONLY", masked numbers. Override with `AADHAAR_FRONT_IMAGE` /
-  `AADHAAR_BACK_IMAGE` / `PAN_IMAGE`.
+Test data (`buildStaff()`): Delivery Staff, MOT "Driver-Delivery Boy", SCC
+"AAG", MPC, "Delivery - All Products", hub **"tEst BD hub"**, shift
+**"TEST SHIft" (11:17 - 23:17)** - the same as the QA BD BGV staff. Phone and
+email seeded from the clock. Every run creates a real "QA Auto <seed>"
+Delivery Staff in Bluedart_Onboarding.
 
 ## Things that are not obvious
 
-- **Vendor-created staff needs BD OPS approval** (staging change, Oct 2026). Add
-  Staff no longer creates the staff: the POST `/org/staff/` reply is
-  `PENDING_REQUEST_APPROVAL — BDR-...` and nothing appears in the vendor list.
-  BD OPS (`2288777001`, `OPS_NUMBER`) approves it in **Approval Workflow →
-  Review → Addition type "New Addition" → Approve & Submit**; only then does the
-  staff exist. titanautomation does the same step via
-  `POST /bluedart/approval-requests/{ref}/approve`. The OPS login has no consent
-  screen and lands on `/rider-management` (`LoginPage.loginAsOps`).
-- **Branch switch is required after login.** The header already shows
-  "Bluedart_Onboarding", but a fresh session has `customerId: null` in its org
-  info. Add Staff then calls `/common/vehicleTypesv2/undefined` and
-  `/org/hubs/list/undefined/all/v2` and MOT/Hub dropdowns come up empty.
-  Choosing the branch in **Switch Branches** (`StaffListPage.switchBranch`) loads
-  the org and they fill. A personal browser often works without it because a
-  branch was picked there before.
-- **Wait for the PUT `/orgs/<id>` before the click, not after** - under
-  `SLOW_MO` it finishes before a listener added afterwards is attached.
-- **Field order in Basic Info matters.** Staff Type is what makes Roll Code and
-  MOT appear; MOT only exists for "Delivery Staff".
-- **Document Validated reveals Aadhaar and PAN checkboxes**, both required.
-- **Work Info:** choose a hub, then a shift (multi-select listbox, close with
-  Escape). At least one shift is mandatory.
-- **Dropdowns are server-backed.** An empty one renders a single option like
-  "No Data Found" / "No hub found". `AddStaffDialog` waits for options before
-  deciding a menu is empty and throws a clear error instead of timing out.
-- **OTP lookup** takes the newest non-validated `STAFFPAY` row and polls,
-  because the row can land a few seconds after Get OTP.
-- **Blue Dart vendors get a Terms & conditions consent screen on every login;**
-  Amazon vendors do not (`login(number, { consent: false })`).
-- **Date pickers:** the field sometimes swallows the click and the calendar
-  never opens - `selectDate` re-clicks until it is visible. It also skips the year list when the calendar is
-  already on the target year - otherwise the current year matches twice
-  (header + list), which bit the Date of Join = today case.
-- **Submit waits for `POST /org/staff/` itself** (`AddStaffDialog.submit`, up to
-  60s): staging can take >5s, and rejections come back as HTTP 200 with
-  `status.code` 400 in the body. A rejection fails with the server's message.
-- **Hubs can be switched off by hand.** If a hub vanishes from the dropdown,
-  check `titan.hubs.is_active` (TBI1_AMZ HSR Store / 1048 was deactivated and
-  re-activated from the Amazon vendor account on 2026-09-30).
-- **KYC documents (Aadhaar / PAN) are not automated.** Never use a real
-  person's documents or ID numbers (e.g. screenshots from production) as test
-  data. Generated "SAMPLE - TEST ONLY" images are fine; ID numbers need
-  staging test values approved by the backend team / KYC provider.
-- **Hub dropdown:** the click sometimes doesn't open it and the list
-  sometimes lacks an active hub - `openHubOptions` re-clicks until open and
-  `selectHub` reopens up to 3 times, then lists the hubs it saw.
-- **SSM tunnels drop** after idle time or a long session; symptoms are
-  `ETIMEDOUT` or `ECONNREFUSED 127.0.0.1:3306`. Restart the tunnel.
-- Every Staff Creation run creates a real "QA Auto <seed>" Delivery Staff in
-  Bluedart_Onboarding on staging.
-
-## Test data (utils/testData.ts)
-
-Amazon: `buildAmazonStaff()` - see the tables in "Amazon Now flow".
-
-Blue Dart: vendor `9519519514` (org Bluedart_Onboarding, id 579), BD OPS
-`2288777001`. Defaults in `buildStaff()`: Delivery Staff, MOT "Driver-Delivery
-Boy", SCC "AAG", MPC, "Delivery - All Products", hub **"tEst BD hub"**, shift
-**"TEST SHIft" (11:17 - 23:17)** - the same as the QA BD BGV staff. Phone and email are seeded from the clock so
-each run is unique. Override per test: `buildStaff({ hubName: '...' })`.
+- **Branch switch is required after login.** A fresh session has
+  `customerId: null`, so Add Staff asks for MOT / hubs with `undefined` and the
+  dropdowns are empty. `StaffListPage.switchBranch` waits for the header org
+  name, opens Switch Branches (retries if the click is ignored), waits for the
+  branch entry, and waits for `PUT /orgs/<id>` (listener attached before the click).
+- **Blue Dart Basic Info order matters:** Staff Type reveals Roll Code and MOT.
+  Document Validated reveals Aadhaar and PAN checkboxes, both required. Work
+  Info: hub, then at least one shift (close the listbox with Escape).
+- **Dropdowns are server-backed;** an empty one shows one option like "No Data
+  Found". `AddStaffDialog` waits for options and throws a clear error.
+- **Date pickers** sometimes swallow the click - `selectDate` re-clicks, and
+  skips the year list when already on the target year.
+- **Submit waits for `POST /org/staff/`** (up to 60s); rejections come back as
+  HTTP 200 with `status.code` 400 and fail with the server's message.
+- **Hub dropdown** sometimes doesn't open or lacks an active hub -
+  `openHubOptions` re-clicks, `selectHub` reopens up to 3 times. Hubs can be
+  switched off by hand (`titan.hubs.is_active`).
+- **OTP lookup** polls for 15s; "No OTP found" is usually a slow staging or a
+  stale tunnel - rerun.
+- **Probing the DB:** add a throwaway `debugQuery` export to `utils/db.ts` and a
+  `tests/_*.cleanup.ts` (project "KYC Cleanup"), then remove both. Never
+  print ID numbers - mask them.
 
 ## Adding a test
 
 1. Locators and actions go in a page object under `pages/`, not in the spec.
 2. Tests that start already logged in go in a normal `*.spec.ts` (project `chromium`).
 3. A full journey that must log in itself goes in `*.e2e.spec.ts` (project `Staff Creation`).
-4. Use `buildAmazonStaff()` (or `buildStaff()` for Blue Dart) for any data that must be unique.
-   For a new org: add its vendor/branch to `config`, a `build<Org>Staff()` with
-   its own name prefix and phone prefix, `fill<Org>...Info` methods on
-   `AddStaffDialog`, and its own `*.e2e.spec.ts` + npm script.
-5. Match titanautomation's Allure layout: name the test as a sentence starting
-   "Verify that ...", and call `allureSuite(test, '<Area>')` (from
-   `utils/allureSuite.ts`) once at the top of the file. Allure then shows
-   Default Suite > staffpay-automation > Login / AddStaff / StaffCreation.
-6. Run it headed with `npm run test:watch -- -g "<name>"`, then the full suite.
+4. Use `buildAmazonStaff()` (Amazon, Somesh identity) or `buildStaff()` (Blue
+   Dart) for data that must be unique. Any Amazon KYC test must free the
+   identity's numbers first (`useKycTestNumbers()` or `releaseTestKycNumbers`)
+   and take the KYC lock.
+5. Match titanautomation's Allure layout: name the test "Verify that ...", call
+   `allureSuite(test, '<Area>')` once at the top of the file.
+6. If the test saves Aadhaar **and** PAN or clicks Retrigger BGV, it costs
+   money - say so in its doc comment, and get approval before every run.
+7. Run it headed (`--headed`, or `npm run test:watch -- -g "<name>"` for
+   non-BGV tests).

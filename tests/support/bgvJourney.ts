@@ -131,10 +131,11 @@ export async function createRiderWithBgvInitiated(
     });
   });
 
-  // Rider-app login - off unless RIDER_APP_STEPS=true (see config.riderAppSteps).
-  await (config.riderAppSteps ? test.step : test.step.skip)('Rider uploads a profile picture and a KYC selfie (rider app)', async () => {
+  // Test data, not an app test: the rider's token comes from /auth/generate-token
+  // (titanautomation's TitanAPI.generateToken) - staging refuses scripted OTP logins.
+  await test.step('Rider uploads a profile picture and a KYC selfie (rider-app API)', async () => {
     const rider = new RiderApi(request);
-    await rider.login(staff.contactNumber);
+    await rider.useGeneratedToken(record.userId, staff.contactNumber);
     const profileLink = await rider.uploadImage(TEST_PROFILE_IMAGE_FILE);
     await rider.saveFullProfile(buildRiderProfile(staff, profileLink));
     await rider.uploadKycSelfie(await rider.uploadImage(TEST_SELFIE_IMAGE_FILE));

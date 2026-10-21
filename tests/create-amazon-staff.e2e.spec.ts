@@ -112,11 +112,11 @@ test('Verify that an Amazon vendor can add a delivery boy who raises the Total S
     });
   });
 
-  // Rider-app login - off unless RIDER_APP_STEPS=true (see config.riderAppSteps).
-  const riderAppStep = config.riderAppSteps ? test.step : test.step.skip;
-  await riderAppStep('Rider logs in to the rider app, uploads a profile picture and a KYC selfie', async () => {
+  // Test data, not an app test: the rider's token comes from /auth/generate-token
+  // (titanautomation's TitanAPI.generateToken) - staging refuses scripted OTP logins.
+  await test.step('Rider uploads a profile picture and a KYC selfie (rider-app API)', async () => {
     const rider = new RiderApi(request);
-    await rider.login(staff.contactNumber);
+    await rider.useGeneratedToken(record.userId, staff.contactNumber);
 
     imageLink = await rider.uploadImage(TEST_PROFILE_IMAGE_FILE);
     const image = await request.get(imageLink);
@@ -145,7 +145,7 @@ test('Verify that an Amazon vendor can add a delivery boy who raises the Total S
     test.info().annotations.push({ type: 'Selfie', description: selfieLink });
   });
 
-  await riderAppStep('Verify the selfie in entity_documents', async () => {
+  await test.step('Verify the selfie in entity_documents', async () => {
     const selfie = await getUserDocument(record.userId, 'SELFIE', 'PENDING_APPROVAL');
     expect(selfie, `no SELFIE row in entity_documents for user ${record.userId}`).toBeDefined();
     // fullProfile/save created the row with the profile picture; the KYC
@@ -187,7 +187,7 @@ test('Verify that an Amazon vendor can add a delivery boy who raises the Total S
     await expect(details.kycStatus('KYC Pending')).toBeVisible();
     await expect(details.summaryPart(record.staffUniqueId)).toBeVisible();
     await expect(details.summaryPart(staff.contactNumber)).toBeVisible();
-    if (config.riderAppSteps) {
+    {
       await expect(details.selfieImage(selfieLink), 'selfie on the vendor portal').toBeVisible();
     }
   });

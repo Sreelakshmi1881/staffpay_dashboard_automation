@@ -14,23 +14,14 @@ export const config = {
   },
 
   /**
-   * Staging KYC test numbers from the backend team - never a real person's
-   * ID. Set them in .env (gitignored); never commit, log or report them.
-   * AADHAAR_TEST_NUMBER is required; PAN_TEST_NUMBER is optional (a PAN is
-   * generated per run when unset - see buildKycNumbers).
+   * The Aadhaar / PAN numbers on the KYC identity's documents (KYC_IDENTITY in
+   * testData.ts). Both required. Set them in .env (gitignored); never commit,
+   * log or report them.
    */
   kycTestNumbers: {
     aadhaar: process.env.AADHAAR_TEST_NUMBER ?? '',
     pan: process.env.PAN_TEST_NUMBER ?? '',
   },
-
-  /**
-   * Steps that log in as the rider through the rider-app API (profile picture,
-   * KYC selfie). Off by default: this is dashboard automation, and staging's
-   * rider-app login now refuses scripted logins ("Please update the Rider app").
-   * RIDER_APP_STEPS=true turns them back on.
-   */
-  riderAppSteps: process.env.RIDER_APP_STEPS === 'true',
 
   db: {
     host: process.env.DB_HOST ?? '127.0.0.1',

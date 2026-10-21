@@ -67,20 +67,38 @@ export interface AmazonStaffData {
 }
 
 /**
- * Amazon staff are named "Auto QA amzuser <3 random digits>" and get a
- * 10-digit number starting 421. The name suffix is only for reading the
- * list; the phone is what must be unique, so its last 7 digits come from
- * the clock. Defaults match a staff created by hand in the dashboard.
+ * The one KYC test identity every Amazon rider is created as - like
+ * titanautomation, where one person's details, selfie and documents always go
+ * together so face match and name/DOB checks line up. The Aadhaar / PAN
+ * numbers on these documents live in .env (AADHAAR_TEST_NUMBER /
+ * PAN_TEST_NUMBER), not here.
+ */
+export const KYC_IDENTITY = {
+  name: 'Somesh Mallick',
+  dateOfBirth: new Date(1976, 0, 5), // 05/01/1976, as on his Aadhaar and PAN
+  selfie: 'test-assets/Somesh_profile.png',
+  documents: {
+    aadhaarFront: 'test-assets/Somesh_adhaarFront.png',
+    aadhaarBack: 'test-assets/Somesh_adhaarBack.png',
+    pan: 'test-assets/Somesh_pan.png',
+  },
+};
+
+/**
+ * Amazon staff are created as KYC_IDENTITY (name and DOB) and get a 10-digit
+ * number starting 421 - not a real mobile range, and what marks a rider as
+ * this suite's for the cleanup. The phone is what must be unique, so its last
+ * 7 digits come from the clock. Defaults match a staff created by hand.
  */
 export function buildAmazonStaff(overrides: Partial<AmazonStaffData> = {}): AmazonStaffData {
   const contactNumber = `421${String(Date.now()).slice(-7)}`;
 
   return {
-    name: `Auto QA amzuser ${Math.floor(100 + Math.random() * 900)}`,
+    name: KYC_IDENTITY.name,
     staffType: 'Delivery Boy',
     contactNumber,
     dateOfJoining: new Date(),
-    dateOfBirth: new Date(1995, 0, 15),
+    dateOfBirth: KYC_IDENTITY.dateOfBirth,
     vehicleType: 'Bike',
     // Bike is BIKE_AMZ, which requires a vehicle number; manual runs reuse the phone.
     vehicleNumber: contactNumber,
@@ -94,47 +112,25 @@ export function buildAmazonStaff(overrides: Partial<AmazonStaffData> = {}): Amaz
   };
 }
 
-/**
- * Profile picture the test rider uploads: a generated placeholder (grey and
- * purple shapes), not anyone's photo. Never use a real rider's picture.
- */
-export const TEST_PROFILE_IMAGE_FILE = process.env.PROFILE_IMAGE ?? 'test-assets/qa-test-profile.png';
+/** Profile picture the rider uploads (rider-app API): the identity's photo. */
+export const TEST_PROFILE_IMAGE_FILE = process.env.PROFILE_IMAGE ?? KYC_IDENTITY.selfie;
 
 /**
- * The Aadhaar / PAN numbers typed into the vendor portal's KYC cards.
- *
- * Aadhaar: the team's fixed staging test number (AADHAAR_TEST_NUMBER in .env,
- * gitignored - never committed, logged or reported). Like titanautomation's
- * Amazon BGV tests, every run reuses that one test identity: staging checks the
- * Aadhaar checksum ("Please enter valid Aadhar number"), so a made-up number
- * cannot be saved. A number held by one rider is DUPLICATE_REJECTED for the next
- * and a Discrepant verdict blacklists it, so the tests take the KYC numbers lock
- * and free it before and after (see useKycTestNumbers).
- *
- * PAN: PAN_TEST_NUMBER from .env if set (freed like the Aadhaar), otherwise
- * generated per run - 4th letter E, a holder type that does not exist, so it
- * can never be a real person's PAN. As of 2026-10-19 staging answers the
- * vendor portal's PAN Update with "SUCCESS" but stores no PANCARD row for
- * either the old team test PAN or a generated one (generated ones were still
- * stored on 2026-10-08) - it appears to drop PANs that fail verification, so a
- * PAN that passes staging's check is needed from the backend team.
+ * The Aadhaar / PAN numbers typed into the vendor portal's KYC cards: those on
+ * KYC_IDENTITY's documents, from AADHAAR_TEST_NUMBER / PAN_TEST_NUMBER in .env
+ * (gitignored - not committed, logged or reported). Every run reuses the same
+ * identity, as titanautomation does: a number held by one rider is
+ * DUPLICATE_REJECTED for the next and a Discrepant verdict blacklists it, so the
+ * tests take the KYC numbers lock and free them before and after (see
+ * useKycTestNumbers). Staging checks both: a made-up Aadhaar fails its checksum
+ * and a PAN that fails verification is silently dropped.
  */
 export function buildKycNumbers(): { aadhaar: string; pan: string } {
-  const aadhaar = config.kycTestNumbers.aadhaar;
-  if (!aadhaar) {
-    throw new Error(
-      'Set AADHAAR_TEST_NUMBER in .env to the staging test Aadhaar from the backend team ' +
-        "(never a real person's ID).",
-    );
+  const { aadhaar, pan } = config.kycTestNumbers;
+  if (!aadhaar || !pan) {
+    throw new Error(`Set AADHAAR_TEST_NUMBER and PAN_TEST_NUMBER in .env to the numbers on ${KYC_IDENTITY.name}'s Aadhaar and PAN.`);
   }
-  return { aadhaar, pan: config.kycTestNumbers.pan || fakePan() };
-}
-
-function fakePan(): string {
-  const digits = (n: number) => Array.from({ length: n }, () => Math.floor(Math.random() * 10)).join('');
-  const letters = (n: number) =>
-    Array.from({ length: n }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('');
-  return `${letters(3)}E${letters(1)}${digits(4)}${letters(1)}`;
+  return { aadhaar, pan };
 }
 
 /**
@@ -143,23 +139,15 @@ function fakePan(): string {
  */
 export const TEST_BGV_ADDRESS = 'No 42, QA Test Street, HSR Layout, Bengaluru, Karnataka, 560102';
 
-/**
- * KYC document images: generated samples marked "SAMPLE - TEST ONLY" with
- * made-up names and masked numbers. Never use real Aadhaar / PAN images.
- */
+/** KYC document images uploaded on the vendor portal: KYC_IDENTITY's own. */
 export const SAMPLE_KYC_DOCUMENTS = {
-  aadhaarFront: process.env.AADHAAR_FRONT_IMAGE ?? 'test-assets/sample-aadhaar-front.png',
-  aadhaarBack: process.env.AADHAAR_BACK_IMAGE ?? 'test-assets/sample-aadhaar-back.png',
-  pan: process.env.PAN_IMAGE ?? 'test-assets/sample-pan.png',
+  aadhaarFront: process.env.AADHAAR_FRONT_IMAGE ?? KYC_IDENTITY.documents.aadhaarFront,
+  aadhaarBack: process.env.AADHAAR_BACK_IMAGE ?? KYC_IDENTITY.documents.aadhaarBack,
+  pan: process.env.PAN_IMAGE ?? KYC_IDENTITY.documents.pan,
 };
 
-/**
- * Selfie the test rider uploads for KYC: the placeholder, unless a run is
- * pointed at a real face explicitly with SELFIE_IMAGE=<path>. Nothing is
- * picked up from disk automatically - a real face must be one its owner has
- * agreed to, and chosen on purpose for that run. Never commit one.
- */
-export const TEST_SELFIE_IMAGE_FILE = process.env.SELFIE_IMAGE ?? TEST_PROFILE_IMAGE_FILE;
+/** KYC selfie the rider uploads (rider-app API): the identity's photo. */
+export const TEST_SELFIE_IMAGE_FILE = process.env.SELFIE_IMAGE ?? KYC_IDENTITY.selfie;
 
 /**
  * What the new rider fills on the rider app's profile screen. All test values.
