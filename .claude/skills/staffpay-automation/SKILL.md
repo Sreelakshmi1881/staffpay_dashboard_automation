@@ -60,7 +60,6 @@ tests/
   auth.setup.ts           logs in once, switches branch, saves .auth/vendor.json
   login.spec.ts           fresh login (starts logged out)
   add-staff.spec.ts       Blue Dart form checks, reuse the saved session
-  create-staff.e2e.spec.ts         Blue Dart: vendor adds staff -> OPS approves -> vendor finds staff
   amazon-kyc-upload.e2e.spec.ts    Amazon happy path, NO BGV: create Somesh -> selfie (API) -> Aadhaar + PAN images -> save Aadhaar
   create-amazon-staff.e2e.spec.ts  Amazon: create + counts + DB + KYC Pending + detail page; 2nd test does KYC + BGV Clear (charged)
   amazon-bgv-{discrepant,insufficient,attention-required}.e2e.spec.ts   BGV scenarios (charged)
@@ -125,7 +124,7 @@ Prerequisites:
 |---|---|
 | `npm test` | Full suite, headless - **includes the charged BGV tests** |
 | `npm run test:watch` | Same, headed, one window, `SLOW_MO=600` - **includes BGV tests** |
-| `npm run test:staff-creation` | Blue Dart journey (vendor adds -> OPS approves -> vendor finds), headed + slow |
+| `npm run test:bluedart` / `test:bluedart:headed` | Blue Dart journey (vendor adds -> super admin approves -> vendor finds) with before/after DB checks |
 | `npx playwright test tests/amazon-kyc-upload.e2e.spec.ts --headed` | Amazon happy path without BGV (safe) |
 | `npm run test:amazon` / `test:amazon:headed` | All Amazon journeys, one worker, then the Allure report - **charged** |
 | `npm run test:amazon-bgv-discrepant` / `-insufficient` / `-attention-required` | One BGV scenario - **charged** |
@@ -314,8 +313,8 @@ Blue Dart (`9519519514`, Bluedart_Onboarding, org 579) puts new staff in
 There is no `titan.users` row, and so nothing in the staff list, until BD OPS
 (`2288777001`) approves it in **Approval Workflow -> Review -> Addition type
 "New Addition" -> Approve & Submit** (`ApprovalWorkflowPage`).
-`create-staff.e2e.spec.ts` does vendor -> OPS -> vendor in one browser, logging
-out between (`LoginPage.logout`, `loginAsOps`). titanautomation approves the
+`bluedart-onboarding-approval.e2e.spec.ts` is the only Blue Dart journey test
+(see below). titanautomation approves the
 same request via `POST /bluedart/approval-requests/{ref}/approve`.
 After the OPS login, Rider Management loads behind a full-page spinner that
 can swallow clicks - `ApprovalWorkflowPage.open` retries for 60s. Status filter
@@ -330,9 +329,10 @@ Delivery Staff in Bluedart_Onboarding.
 ## Blue Dart onboarding with super-admin approval - before/after checks
 
 Test: `tests/bluedart-onboarding-approval.e2e.spec.ts`
-(`npm run test:bluedart`, `npm run test:bluedart:headed`). Same flow as
-`create-staff.e2e.spec.ts`, but with a remark, separate vendor / super-admin
-browser sessions and DB checks before and after approval.
+(`npm run test:bluedart`, `npm run test:bluedart:headed`). The Blue Dart
+journey test - it replaced the old `create-staff.e2e.spec.ts`. Uses a remark,
+separate vendor / super-admin browser sessions and DB checks before and after
+approval.
 
 1. **Vendor** `9519519514` (org Bluedart_Onboarding, id 579) logs in - T&C
    consent screen every login - switches branch, Show Count, adds a

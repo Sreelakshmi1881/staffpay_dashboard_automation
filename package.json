@@ -15,8 +15,6 @@
     "test:auth": "playwright test --project=setup",
     "pretest:no-auth": "npm run clean:results",
     "test:no-auth": "playwright test --project=chromium --no-deps",
-    "pretest:staff-creation": "npm run clean:results",
-    "test:staff-creation": "SLOW_MO=600 playwright test tests/create-staff.e2e.spec.ts --project=\"Staff Creation\" --headed",
     "pretest:amazon-staff-creation": "npm run clean:results",
     "test:amazon-staff-creation": "SLOW_MO=600 playwright test tests/create-amazon-staff.e2e.spec.ts --project=\"Staff Creation\" --headed",
     "pretest:amazon-bgv-discrepant": "npm run clean:results",
