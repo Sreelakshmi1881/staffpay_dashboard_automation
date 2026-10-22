@@ -66,6 +66,7 @@ tests/
   amazon-bgv-{discrepant,insufficient,attention-required}.e2e.spec.ts   BGV scenarios (charged)
   support/bgvJourney.ts   shared BGV steps + useKycTestNumbers() (lock + document cleanup)
   kyc.cleanup.ts          manual cleanup, `npm run cleanup:kyc`
+  bluedart-onboarding-approval.e2e.spec.ts  Blue Dart: vendor adds -> super admin approves (with remark) -> before/after DB checks -> vendor sees rider
   explore.spec.ts         scratch; skipped unless run with --debug
 utils/
   config.ts               vendor / OPS numbers, branches, KYC numbers (from .env), DB host/port/name
@@ -132,6 +133,7 @@ Prerequisites:
 | `npx playwright test -g "<name>"` / `--debug` | One test by name / step through with the inspector |
 | `npm run cleanup:kyc` | Deactivate Aadhaar / PAN rows of all test riders (numbers starting 421) |
 | `npm run allure` / `npm run report` | Allure report / Playwright HTML report of the last run |
+| `npm run test:bluedart` / `test:bluedart:headed` | Blue Dart: vendor adds staff -> super admin approves -> vendor sees rider |
 
 Headless is the default (Chrome doesn't open); add `--headed` or use the
 `test:watch` / `test:*` scripts to watch.
@@ -325,6 +327,45 @@ Test data (`buildStaff()`): Delivery Staff, MOT "Driver-Delivery Boy", SCC
 email seeded from the clock. Every run creates a real "QA Auto <seed>"
 Delivery Staff in Bluedart_Onboarding.
 
+## Blue Dart onboarding with super-admin approval - before/after checks
+
+Test: `tests/bluedart-onboarding-approval.e2e.spec.ts`
+(`npm run test:bluedart`, `npm run test:bluedart:headed`). Same flow as
+`create-staff.e2e.spec.ts`, but with a remark, separate vendor / super-admin
+browser sessions and DB checks before and after approval.
+
+1. **Vendor** `9519519514` (org Bluedart_Onboarding, id 579) logs in - T&C
+   consent screen every login - switches branch, Show Count, adds a
+   Delivery Staff (`buildStaff()`: hub **tEst BD hub** = store
+   `TESTBDHUB123`, shift **TEST SHIft**). Add Staff answers
+   `PENDING_REQUEST_APPROVAL — BDR-XXXXXXXXXXXX` (HTTP 200, code 200).
+2. **Before approval** - `titan.bluedart_approval_request`: `request_type
+   ONBOARDING`, `status PENDING`, `request_ref` = the BDR ref, org_id 579,
+   `requester_role BLUEDART_VENDOR`, `subject_user_id`, `addition_type`,
+   `decided_by`, `decided_by_role` all NULL. **No `users` row**, and the rider
+   is not in the vendor's staff list.
+3. **Super admin** `2288777001` ("Test BD Super Admin", role 30, org 579; no
+   consent screen) lands on `/rider-management`. Tab **Approval Workflow**
+   (`/approval-workflow`, `ApprovalWorkflowPage`) -> **Onboarding** ->
+   **Pending N** list (`POST /bluedart/approval-requests/list` {requestType
+   ONBOARDING, status PENDING, pageSize 20}, newest first). No phone search;
+   find the row by phone. **Review** dialog: header "ONBOARDING · PENDING",
+   **Addition type \*** select (options **New Addition** / **Replacement**),
+   **Remark (optional)**, buttons Close / Reject / **Approve & Submit**
+   (disabled until an addition type is picked).
+4. **After approval** - request `status APPROVED`, `addition_type
+   NEW_ADDITION`, `decided_by_role BLUEDART_SUPER_ADMIN`, `decision_remark` =
+   the remark, `decided_by` / `decided_at` set, `subject_user_id` = the new
+   `users.id`. `users` row created: `status CREATED`, is_active 1, org 579,
+   `user_info.hub_id` 1123. Row in the **Approved** list with Last Action
+   "Test BD Super Admin  Super Admin · <time>" (role label, not the DB value) and a View button.
+5. **Vendor** again: Show Count - Total Staffs and KYC Pending both up;
+   search the phone under Total and under the KYC Pending card -> row found.
+
+The test drives two browser contexts (vendor + super admin). Other people's
+suites also create and approve "QA Auto" Blue Dart riders on staging, so
+counts are asserted as "went up", not "+1".
+
 ## Things that are not obvious
 
 - **Branch switch is required after login.** A fresh session has
@@ -349,6 +390,11 @@ Delivery Staff in Bluedart_Onboarding.
 - **Probing the DB:** add a throwaway `debugQuery` export to `utils/db.ts` and a
   `tests/_*.cleanup.ts` (project "KYC Cleanup"), then remove both. Never
   print ID numbers - mask them.
+- **Staff list search twice:** after a search the Search button turns into
+  **Reset**; `StaffListPage.search()` doesn't handle that, so the Blue Dart
+  approval test clicks Reset first (its `searchVendorList` helper). The Review
+  dialog remark is also filled in that test - `ApprovalWorkflowPage.approve()`
+  doesn't take a remark. Shared page objects are left as Sreelakshmi wrote them.
 
 ## Adding a test
 
