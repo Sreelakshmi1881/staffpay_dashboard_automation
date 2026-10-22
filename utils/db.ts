@@ -310,6 +310,65 @@ export async function clearUserBlacklistForContact(contactNumber: string): Promi
   return result.affectedRows;
 }
 
+/** A row of titan.bluedart_approval_request - Blue Dart's onboarding approval queue. */
+export interface BluedartApprovalRequest {
+  id: number;
+  requestRef: string;
+  requestType: string;
+  status: string;
+  subjectUserId: number | null;
+  contactNumber: string;
+  storeId: string | null;
+  orgId: number;
+  additionType: string | null;
+  requesterRole: string | null;
+  decidedBy: number | null;
+  decidedByRole: string | null;
+  decidedAt: Date | null;
+  decisionRemark: string | null;
+}
+
+/**
+ * The newest approval request for a phone number. Polls until it exists and,
+ * if given, reaches `status`; returns the last row seen (or undefined).
+ */
+export async function getBluedartApprovalRequest(
+  contactNumber: string,
+  status?: string,
+  timeoutMs = 20_000,
+): Promise<BluedartApprovalRequest | undefined> {
+  const sql = `SELECT id, request_ref AS requestRef, request_type AS requestType, status,
+                      subject_user_id AS subjectUserId, contact_number AS contactNumber,
+                      store_id AS storeId, org_id AS orgId, addition_type AS additionType,
+                      requester_role AS requesterRole, decided_by AS decidedBy,
+                      decided_by_role AS decidedByRole, decided_at AS decidedAt,
+                      decision_remark AS decisionRemark
+               FROM bluedart_approval_request
+               WHERE contact_number = ?
+               ORDER BY id DESC LIMIT 1`;
+  const deadline = Date.now() + timeoutMs;
+  let row: BluedartApprovalRequest | undefined;
+  while (true) {
+    const [rows] = await (await getPool()).execute<any[]>(sql, [contactNumber]);
+    row = rows[0];
+    if (row && (!status || row.status === status)) return row;
+    if (Date.now() > deadline) return row;
+    await new Promise(r => setTimeout(r, 1000));
+  }
+}
+
+/** The users row for a phone number, if any - absent until Blue Dart approval. */
+export async function getUserByContact(
+  contactNumber: string,
+): Promise<{ id: number; name: string; status: string; isActive: number; orgId: number } | undefined> {
+  const [rows] = await (await getPool()).execute<any[]>(
+    `SELECT id, name, status, is_active + 0 AS isActive, organization_id AS orgId
+     FROM users WHERE contact_number = ? ORDER BY id DESC LIMIT 1`,
+    [contactNumber],
+  );
+  return rows[0];
+}
+
 export async function closeDb(): Promise<void> {
   if (pool) await (await pool).end();
 }
